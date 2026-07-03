@@ -651,41 +651,14 @@ func (m *Model) submitChatWithCtx(text, contextText string) tea.Cmd {
 // chatContext assembles the grounding text handed to the chat LLM: a snapshot of
 // the selected asset's live metrics plus the interpreted signals, so the agent
 // answers from the same normalized read the panel shows — not raw numbers alone.
+// The actual computation lives in reasoner.BuildChatContext so the HTTP API's
+// /api/chat endpoint can share it rather than duplicating this logic.
 func (m *Model) chatContext() string {
 	coin := m.selectedCoin()
 	if coin == "" {
 		return ""
 	}
-	tf := m.timeframes[coin]
-	bar, ok := m.store.LatestBar(coin, tf)
-	if !ok {
-		return fmt.Sprintf("Selected asset: %s (%s). No live bar yet.", coin, tf)
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b,
-		"Selected asset %s (display tf %s): close %.4f  return %+.3f%%  funding %+.4f%%  OIΔ %+.2f%%  CVD %.0f.  Position size %.4f.",
-		coin, tf, bar.Close, bar.Return*100, bar.Funding*100, bar.OIDelta*100, bar.CVD, m.store.Position(coin).Size)
-
-	// Hand the model the cross-timeframe confluence — structure, not canned prose —
-	// so it writes the interpretation grounded in what actually aligns across 15m–1d.
-	if conf := m.confluence(coin); len(conf) > 0 {
-		parts := make([]string, 0, len(conf))
-		for _, c := range conf[:min(5, len(conf))] {
-			dir := "context"
-			if c.Directional {
-				if c.Score > 0 {
-					dir = "bullish"
-				} else {
-					dir = "bearish"
-				}
-			}
-			parts = append(parts, fmt.Sprintf("%s (%s; aligns on %s; strength %.0f%%)",
-				c.Label, dir, strings.Join(c.Timeframes, "/"), c.Strength*100))
-		}
-		b.WriteString("\nCross-timeframe signals (ranked): " + strings.Join(parts, "; "))
-	}
-	return b.String()
+	return reasoner.BuildChatContext(m.store, coin, m.timeframes[coin])
 }
 
 // postThesis adds an actionable batch verdict to the conversation as a proactive

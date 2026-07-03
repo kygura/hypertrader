@@ -79,6 +79,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/digests/{coin}", s.handleDigest)
 	s.mux.HandleFunc("GET /api/verdicts", s.handleVerdicts)
 	s.mux.HandleFunc("GET /api/journal", s.handleJournal)
+	s.mux.HandleFunc("POST /api/chat", s.handleChat)
+	s.mux.HandleFunc("GET /api/proposals", s.handleProposalsList)
+	s.mux.HandleFunc("POST /api/proposals/{id}/approve", s.handleProposalApprove)
+	s.mux.HandleFunc("POST /api/proposals/{id}/reject", s.handleProposalReject)
+	s.mux.HandleFunc("POST /api/orders", s.handleOrders)
+	s.mux.HandleFunc("DELETE /api/orders/{coin}/{oid}", s.handleCancelOrder)
 }
 
 // runCaches is the single owner of serverState: it subscribes once per topic
