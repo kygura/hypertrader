@@ -5,6 +5,7 @@
 package journal
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -76,6 +77,42 @@ func (j *Journal) appendFile(e Entry) error {
 	}
 	defer f.Close()
 	return json.NewEncoder(f).Encode(e)
+}
+
+// ReadDay reads the NDJSON journal file for one UTC calendar day (dir is the
+// storage root, i.e. the same dir passed to New — this joins "journal" and
+// the date itself, matching where Record writes). date must parse as
+// YYYY-MM-DD; this also rules out path-traversal-shaped input reaching
+// filepath.Join. Malformed lines are skipped rather than failing the whole
+// read — one corrupt entry shouldn't hide a day's history. A missing file
+// (nothing was ever journaled that day) returns an empty slice, not an error.
+func ReadDay(dir, date string) ([]Entry, error) {
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		return nil, fmt.Errorf("journal: invalid date %q: %w", date, err)
+	}
+	path := filepath.Join(dir, "journal", date+".ndjson")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var out []Entry
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		var e Entry
+		if json.Unmarshal(sc.Bytes(), &e) == nil {
+			out = append(out, e)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 // RecentSummaries returns up to n recent entry summaries for a coin, oldest-first.

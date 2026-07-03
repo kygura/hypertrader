@@ -74,6 +74,11 @@ func NewServer(d Deps) *Server {
 // table reads as a single table of truth as endpoints are added task by task.
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/markets", s.handleMarkets)
+	s.mux.HandleFunc("GET /api/bars/{coin}", s.handleBars)
+	s.mux.HandleFunc("GET /api/digests/{coin}", s.handleDigest)
+	s.mux.HandleFunc("GET /api/verdicts", s.handleVerdicts)
+	s.mux.HandleFunc("GET /api/journal", s.handleJournal)
 }
 
 // runCaches is the single owner of serverState: it subscribes once per topic
