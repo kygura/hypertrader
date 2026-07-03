@@ -5,3 +5,5 @@ dist/
 tui/hyperagent
 tui/data/journal/
 graphify-out/
+
+tui/data/
