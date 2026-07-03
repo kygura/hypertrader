@@ -32,9 +32,10 @@ type Deps struct {
 }
 
 // serverState is the single cache the background goroutine (runCaches) owns:
-// connection/mode status, latest digest per coin, latest verdict per asset.
-// One goroutine writes, request handlers read — one RWMutex, no scattered
-// locks scattered across the read handlers.
+// connection/mode status, latest digest per coin, latest verdict per asset,
+// and the registry of live WS clients. One goroutine writes the cache fields,
+// request/WS handlers read and register — one RWMutex, no scattered locks
+// across the read handlers.
 type serverState struct {
 	mu sync.RWMutex
 
@@ -43,6 +44,8 @@ type serverState struct {
 
 	digests  map[string]metrics.Digest // coin -> latest digest
 	verdicts []metrics.Verdict         // newest-first, latest per asset
+
+	wsClients map[*wsClient]struct{}
 }
 
 // Server is the HTTP+WS surface. Construct with NewServer, obtain a wrapped
@@ -62,7 +65,8 @@ func NewServer(d Deps) *Server {
 		deps: d,
 		mux:  http.NewServeMux(),
 		state: &serverState{
-			digests: make(map[string]metrics.Digest),
+			digests:   make(map[string]metrics.Digest),
+			wsClients: make(map[*wsClient]struct{}),
 		},
 	}
 	s.routes()
@@ -85,15 +89,22 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/proposals/{id}/reject", s.handleProposalReject)
 	s.mux.HandleFunc("POST /api/orders", s.handleOrders)
 	s.mux.HandleFunc("DELETE /api/orders/{coin}/{oid}", s.handleCancelOrder)
+	s.mux.HandleFunc("GET /api/ws", s.handleWS)
 }
 
 // runCaches is the single owner of serverState: it subscribes once per topic
 // and never blocks a producer (the bus already guarantees non-blocking
 // publish; buffered channels here just give the goroutine slack to drain).
+// It also fans every event it consumes out to registered WS clients (Task 6)
+// — one subscription set, two consumers (the request-handler caches and the
+// WS broadcast), rather than a second parallel subscription goroutine.
 func (s *Server) runCaches() {
 	statusCh := s.deps.Bus.SubscribeStatus(8)
 	digestsCh := s.deps.Bus.SubscribeDigests(16)
 	verdictsCh := s.deps.Bus.SubscribeVerdicts(16)
+	barsCh := s.deps.Bus.SubscribeBars(32)
+	journalCh := s.deps.Bus.SubscribeJournal(32)
+	midsCh := s.deps.Bus.SubscribeMids(32)
 	for {
 		select {
 		case ev, ok := <-statusCh:
@@ -108,6 +119,7 @@ func (s *Server) runCaches() {
 				s.state.mode = ev.Mode
 			}
 			s.state.mu.Unlock()
+			s.broadcast("status", ev)
 		case d, ok := <-digestsCh:
 			if !ok {
 				return
@@ -128,6 +140,22 @@ func (s *Server) runCaches() {
 			}
 			s.state.verdicts = append([]metrics.Verdict{v}, kept...)
 			s.state.mu.Unlock()
+			s.broadcast("verdict", v)
+		case bar, ok := <-barsCh:
+			if !ok {
+				return
+			}
+			s.broadcast("bar", bar)
+		case je, ok := <-journalCh:
+			if !ok {
+				return
+			}
+			s.broadcast("journal", je)
+		case mids, ok := <-midsCh:
+			if !ok {
+				return
+			}
+			s.broadcast("mids", mids)
 		}
 	}
 }

@@ -6,6 +6,11 @@ import "net/http"
 // configured. With no token configured (the loopback-only default), the API
 // is open to anything that can reach the port — the config-level loopback
 // guard is what keeps that safe.
+//
+// A browser's WebSocket client cannot set an Authorization header on the
+// handshake request, so /api/ws also accepts the token as a ?token= query
+// parameter; that check lives here (rather than only in the ws handler) so
+// every route uniformly accepts either form.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := s.deps.Cfg.API.Token
@@ -13,11 +18,15 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.Header.Get("Authorization") != "Bearer "+token {
-			writeErr(w, http.StatusUnauthorized, "unauthorized")
+		if r.Header.Get("Authorization") == "Bearer "+token {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		if r.URL.Query().Get("token") == token {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
 	})
 }
 
