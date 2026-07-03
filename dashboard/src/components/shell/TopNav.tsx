@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useAllMids } from '../../hooks/useHLStream'
+import { useCoreHealth } from '../../hooks/useCore'
 
 const navItems = [
   { to: '/dashboard', label: 'DASHBOARD' },
@@ -8,8 +9,12 @@ const navItems = [
 
 export function TopNav() {
   const { mids, connected } = useAllMids()
+  const { health, online } = useCoreHealth()
   const btc = mids?.['BTC'] ? Number(mids['BTC']) : null
   const eth = mids?.['ETH'] ? Number(mids['ETH']) : null
+  const coreTitle = health
+    ? `mode: ${health.mode} · chat: ${health.providers.chat} · batch: ${health.providers.batch}`
+    : 'core daemon unreachable'
 
   return (
     <header className="h-10 flex-shrink-0 flex items-center px-3 border-b border-border bg-panel-alt">
@@ -43,6 +48,11 @@ export function TopNav() {
 
       {/* Right side */}
       <div className="ml-auto flex items-center gap-4 text-[10px] uppercase tracking-wider">
+        <div className="flex items-center gap-1.5" title={coreTitle}>
+          <span className={online ? 'text-green' : 'text-text-secondary/50'}>
+            CORE {online ? '●' : '○'}
+          </span>
+        </div>
         <div className="flex items-center gap-1.5">
           <span
             className={`inline-block w-1.5 h-1.5 ${
