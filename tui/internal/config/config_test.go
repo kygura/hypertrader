@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,6 +47,47 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if got.Execution.PostStopCooldown.Duration != 45*time.Minute {
 		t.Errorf("duration lost: %v", got.Execution.PostStopCooldown)
+	}
+}
+
+// TestDefaultAPI verifies a bare config gets the loopback-only, no-auth API
+// defaults so the daemon serves the HTTP API out of the box.
+func TestDefaultAPI(t *testing.T) {
+	cfg := Default()
+	if !cfg.API.Enabled {
+		t.Error("API.Enabled should default true")
+	}
+	if cfg.API.Addr != "127.0.0.1:8787" {
+		t.Errorf("API.Addr = %q, want 127.0.0.1:8787", cfg.API.Addr)
+	}
+}
+
+// TestLoadRejectsNonLoopbackWithoutToken: binding the execution surface off
+// loopback with no bearer token is a startup error, not a silent open port.
+func TestLoadRejectsNonLoopbackWithoutToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := "[api]\n  enabled = true\n  addr = \"0.0.0.0:8787\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for non-loopback addr without token")
+	}
+	if !strings.Contains(err.Error(), "without [api] token") {
+		t.Errorf("error = %q, want it to mention 'without [api] token'", err.Error())
+	}
+}
+
+// TestLoadAllowsNonLoopbackWithToken: a token authorizes an off-loopback bind.
+func TestLoadAllowsNonLoopbackWithToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := "[api]\n  enabled = true\n  addr = \"0.0.0.0:8787\"\n  token = \"x\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("token should authorize non-loopback bind: %v", err)
 	}
 }
 

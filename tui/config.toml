@@ -63,3 +63,12 @@
   use_coingecko = true
   [marketdata.ids]
     HYPE = "hyperliquid"
+
+[api]
+  # Unified backend core HTTP+WS surface (internal/api). Default bind is
+  # loopback-only with no auth. Setting a non-loopback addr without a token
+  # is a startup error — the execution surface must never come up open.
+  enabled = true
+  addr = "127.0.0.1:8787"
+  # token = ""   # optional; when set, Bearer auth required (needed off-localhost)
+  cors_origins = ["http://localhost:5173"]

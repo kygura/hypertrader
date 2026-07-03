@@ -6,6 +6,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,6 +24,7 @@ type Config struct {
 	Providers  Providers  `toml:"providers"`
 	Storage    Storage    `toml:"storage"`
 	MarketData MarketData `toml:"marketdata"`
+	API        API        `toml:"api"`
 }
 
 // MarketData configures the historical backfill sources independent of
@@ -138,6 +140,17 @@ type Storage struct {
 	HistoryBars int    `toml:"history_bars"`
 }
 
+// API configures the daemon's HTTP+WS surface (internal/api): the unified
+// backend core any frontend attaches to. Default bind is loopback-only with no
+// auth; a non-loopback Addr requires a Token, enforced in validate() — the
+// execution surface must never come up open on a public interface.
+type API struct {
+	Enabled     bool     `toml:"enabled"`
+	Addr        string   `toml:"addr"`
+	Token       string   `toml:"token"`
+	CORSOrigins []string `toml:"cors_origins"`
+}
+
 // Duration is a TOML-friendly time.Duration that parses "1h", "30s", etc.
 type Duration struct{ time.Duration }
 
@@ -208,6 +221,11 @@ func Default() Config {
 			CSVDir:       "./data/csv",
 			UseCoinGecko: true,
 		},
+		API: API{
+			Enabled:     true,
+			Addr:        "127.0.0.1:8787",
+			CORSOrigins: []string{"http://localhost:5173"},
+		},
 	}
 }
 
@@ -268,5 +286,23 @@ func (c Config) validate() error {
 	if c.Execution.Mode != "propose" && c.Execution.Mode != "autonomous" {
 		return fmt.Errorf("config: execution.mode must be propose|autonomous, got %q", c.Execution.Mode)
 	}
+	if c.API.Enabled && c.API.Token == "" && !isLoopbackAddr(c.API.Addr) {
+		return fmt.Errorf("api: refusing to bind non-loopback %s without [api] token", c.API.Addr)
+	}
 	return nil
+}
+
+// isLoopbackAddr reports whether addr's host resolves to a loopback address.
+// "localhost" is treated as loopback without a DNS lookup, matching the
+// common local-dev case even when it's not in /etc/hosts.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
