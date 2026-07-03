@@ -1,0 +1,283 @@
+@import 'tailwindcss';
+
+@import 'react-grid-layout/css/styles.css';
+@import 'react-resizable/css/styles.css';
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2')
+    format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --color-body: #100e0a;
+  --color-panel: #111111;
+  --color-panel-alt: #0d0d0d;
+  --color-elevated: #191613;
+  --color-hover: rgba(255, 255, 255, 0.04);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-subtle: rgba(255, 255, 255, 0.04);
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #928d86;
+  --color-text-muted: #d5d1cd;
+  --color-green: #38a67c;
+  --color-red: #bc263e;
+  --color-red-accent: #ed3602;
+  --color-amber: #ffb800;
+
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-sans: 'Geist Mono', ui-monospace, monospace;
+}
+
+:root {
+  --bg-body: #100e0a;
+  --bg-panel: #111111;
+  --bg-panel-alt: #0d0d0d;
+  --bg-elevated: #191613;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --text-primary: #ffffff;
+  --text-secondary: #928d86;
+  --text-muted: #d5d1cd;
+  --green: #38a67c;
+  --red: #bc263e;
+  --red-accent: #ed3602;
+  --amber: #ffb800;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-body);
+  color: var(--text-primary);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+
+/* Mono / tabular numbers everywhere data lives */
+.mono,
+.tabular {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Labels */
+.label {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel-alt);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* react-grid-layout overrides */
+.react-grid-item.react-grid-placeholder {
+  background: var(--red-accent) !important;
+  opacity: 0.15 !important;
+}
+.react-grid-item > .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.react-grid-item:hover > .react-resizable-handle {
+  opacity: 0.6;
+}
+.react-grid-item > .react-resizable-handle::after {
+  border-color: var(--text-secondary) !important;
+}
+
+/* Buttons */
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Inputs */
+input,
+select {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+}
+input:focus,
+select:focus {
+  border-color: var(--text-secondary);
+}
+
+/* Active tab underline (used by branches tabs) */
+.tab-active {
+  border-bottom: 2px solid var(--red-accent);
+  color: var(--text-primary);
+}
+
+/* ─── Custom slider — dark red track + bright orange pill thumb ─── */
+.cs-track {
+  position: relative;
+  height: 32px;
+  background: rgba(40, 12, 6, 0.85);
+  border: 1px solid rgba(237, 54, 2, 0.35);
+  user-select: none;
+  cursor: pointer;
+  touch-action: none;
+}
+.cs-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(237, 54, 2, 0.35) 0%,
+    rgba(237, 54, 2, 0.18) 100%
+  );
+  pointer-events: none;
+}
+.cs-tick {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: rgba(237, 54, 2, 0.55);
+  pointer-events: none;
+}
+.cs-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 8px;
+  background: var(--red-accent);
+  border: 1px solid #ff7a3d;
+  box-shadow:
+    0 0 8px rgba(237, 54, 2, 0.55),
+    0 0 0 1px rgba(237, 54, 2, 0.35);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.cs-track:hover .cs-thumb {
+  box-shadow:
+    0 0 12px rgba(237, 54, 2, 0.75),
+    0 0 0 1px rgba(237, 54, 2, 0.5);
+}
+.cs-track:focus {
+  outline: none;
+  border-color: rgba(237, 54, 2, 0.7);
+}
+
+/* ─── Animated digit (vertical fade swap) ─── */
+.digit-cell {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: baseline;
+  line-height: 1em;
+}
+.digit-slot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform, opacity;
+}
+@keyframes digit-enter {
+  from {
+    transform: translateY(-85%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+@keyframes digit-exit {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(85%);
+    opacity: 0;
+  }
+}
+.digit-in {
+  animation: digit-enter 220ms ease-out both;
+}
+.digit-out {
+  animation: digit-exit 220ms ease-out both;
+}

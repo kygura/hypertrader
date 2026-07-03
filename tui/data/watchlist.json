@@ -1,0 +1,24 @@
+{
+  "visualized": [
+    "BTC",
+    "HYPE",
+    "ZEC",
+    "XPL"
+  ],
+  "tracked": [
+    "BTC",
+    "ETH",
+    "HYPE",
+    "SOL",
+    "XPL",
+    "ZEC"
+  ],
+  "timeframes": {
+    "BTC": "4h",
+    "ETH": "4h",
+    "HYPE": "1h",
+    "SOL": "4h",
+    "XPL": "1h",
+    "ZEC": "4h"
+  }
+}

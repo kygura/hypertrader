@@ -1,0 +1,65 @@
+# hyperagent configuration — edited by the in-app settings (s); hand edits are preserved on load.
+[markets]
+  # Watch many, reason over a subset (plan §1: 10–30 markets is the surface).
+  visualized = ["BTC", "ETH", "SOL", "HYPE", "XPL", "ZEC", "DOGE", "XRP", "SUI", "AVAX", "LINK", "BNB"]
+  tracked = ["BTC", "ETH", "SOL", "HYPE", "XPL", "ZEC"]
+
+[timeframe]
+  default = "1h"
+  [timeframe.per_asset]
+    BTC = "4h"
+
+[reasoner]
+  batch_provider = "anthropic"
+  chat_provider = "deepseek"
+  batch_model = "claude-sonnet-4-6"
+  chat_model = "deepseek-reasoner"
+  read_every_batch = true
+
+[execution]
+  mode = "propose"
+  max_position_usd = 5000.0
+  max_total_exposure_usd = 15000.0
+  max_concurrent = 5
+  daily_loss_kill_usd = 1000.0
+  max_price_deviation = 0.02
+  post_stop_cooldown = "30m0s"
+
+[telegram]
+  enabled = false
+  bot_token = ""
+  chat_id = ""
+
+[providers]
+  [providers.anthropic]
+    api_key = ""
+    api_key_env = ""
+    model = "claude-opus-4-8"
+    base_url = "https://api.anthropic.com"
+    models = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+    kind = ""
+  [providers.openai]
+    api_key = ""
+    api_key_env = ""
+    model = "gpt-4o"
+    base_url = "https://api.openai.com/v1"
+    models = ["gpt-4o", "gpt-4o-mini"]
+    kind = ""
+  [providers.deepseek]
+    api_key = ""
+    api_key_env = ""
+    model = "deepseek-chat"
+    base_url = "https://api.deepseek.com/v1"
+    models = ["deepseek-chat", "deepseek-reasoner"]
+    kind = ""
+
+[storage]
+  dir = "./data"
+  ring_size = 512
+  history_bars = 120
+
+[marketdata]
+  csv_dir = "./data/csv"
+  use_coingecko = true
+  [marketdata.ids]
+    HYPE = "hyperliquid"

@@ -1,0 +1,88 @@
+// Package reasoner is the model-agnostic LLM layer. One Go interface (Provider)
+// abstracts every model; adapters live in subfiles. The reasoner reads gated
+// digests and emits structured, schema-validated Verdicts — never free text.
+//
+// The same Provider interface backs both the autonomous batch loop and the
+// interactive chat pane, so they share one code path (the plan's requirement).
+package reasoner
+
+import (
+	"context"
+
+	"github.com/hyperagent/hyperagent/internal/metrics"
+)
+
+// The structured-output types live in the dependency-free metrics package so the
+// event bus can reference Verdict without importing reasoner (which would create
+// a cycle). We re-export them here as aliases so reasoner code reads naturally.
+type (
+	Action  = metrics.Action
+	Entry   = metrics.Entry
+	Verdict = metrics.Verdict
+)
+
+const (
+	ActionOpenShort = metrics.ActionOpenShort
+	ActionOpenLong  = metrics.ActionOpenLong
+	ActionClose     = metrics.ActionClose
+	ActionScale     = metrics.ActionScale
+	ActionHold      = metrics.ActionHold
+	ActionAlertOnly = metrics.ActionAlertOnly
+)
+
+// Role identifies which configured provider to use: routine batch reasoning vs
+// interactive chat / escalations. The plan splits these so a cheap model can do
+// batches while a stronger one handles chat.
+type Role string
+
+const (
+	RoleBatch Role = "batch"
+	RoleChat  Role = "chat"
+)
+
+// Request is the input to a provider completion. For batch reasoning it carries
+// gated digests; for chat it carries the user message plus context.
+type Request struct {
+	Role Role
+
+	// Model selects the model id for this completion. When empty, the adapter falls
+	// back to its constructed default. The registry binds (provider, model) per role
+	// and injects the bound model here — this is what makes the model, not just the
+	// provider, switchable at runtime.
+	Model string
+
+	// Batch inputs.
+	Digests []metrics.Digest
+
+	// Chat inputs.
+	UserMessage string
+	ChatHistory []ChatTurn
+
+	// Shared context: a system framing and any extra grounding text (e.g. recent
+	// journal excerpts) the caller wants to inject.
+	System  string
+	Context string
+}
+
+// ChatTurn is one message in the interactive conversation.
+type ChatTurn struct {
+	Role string // "user" | "assistant"
+	Text string
+}
+
+// Response is what a provider returns. For batch requests Verdicts is populated;
+// for chat requests Reply holds the assistant's text (and Verdicts may be empty).
+type Response struct {
+	Verdicts []Verdict
+	Reply    string
+	Model    string
+}
+
+// Provider is the single abstraction over every LLM backend.
+type Provider interface {
+	// Name returns a short identifier for status display and journaling.
+	Name() string
+	// Complete runs one completion. Implementations must respect ctx for
+	// timeout/cancellation — LLM calls run in their own goroutines with timeouts.
+	Complete(ctx context.Context, req Request) (Response, error)
+}
