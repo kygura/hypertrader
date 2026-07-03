@@ -174,8 +174,20 @@ func run(cfg config.Config, configPath string, testnet, headless bool, agentKey 
 	in := ingestor.New(wsURL, cfg.Markets.Visualized, b)
 
 	// --- Telegram (optional) ---
+	// Approve/reject route through the executor's shared proposal registry —
+	// the same confirm flow the HTTP API's /api/proposals endpoints use.
 	if cfg.Telegram.Enabled && cfg.Telegram.BotToken != "" {
 		tg := telegram.New(cfg.Telegram.BotToken, cfg.Telegram.ChatID)
+		tg.OnApprove(func(id string) {
+			if err := exec.Approve(ctx, id); err != nil {
+				log.Printf("telegram approve %s: %v", id, err)
+			}
+		})
+		tg.OnReject(func(id string) {
+			if err := exec.Reject(id); err != nil {
+				log.Printf("telegram reject %s: %v", id, err)
+			}
+		})
 		go tg.Mirror(ctx, b)
 		go tg.PollCallbacks(ctx)
 	}

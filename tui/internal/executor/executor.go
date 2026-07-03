@@ -57,6 +57,8 @@ type Executor struct {
 	mainnet bool
 	http    *http.Client
 
+	proposals *ProposalRegistry
+
 	mu            sync.Mutex
 	dailyRealized float64
 	dailyResetDay string
@@ -77,8 +79,14 @@ func New(cfg RiskConfig, b *bus.Bus, s MarketState, j *journal.Journal, signer *
 		mainnet:       mainnet,
 		http:          &http.Client{Timeout: 15 * time.Second},
 		cooldownUntil: make(map[string]time.Time),
+		proposals:     NewProposalRegistry(0),
 	}
 }
+
+// Proposals returns the shared proposal registry. Telegram's inline buttons
+// and the API's approve/reject endpoints both resolve against it — one
+// confirm flow, two surfaces.
+func (e *Executor) Proposals() *ProposalRegistry { return e.proposals }
 
 // Mode returns the current execution mode under lock.
 func (e *Executor) Mode() string {
@@ -118,10 +126,13 @@ func (e *Executor) Handle(v reasoner.Verdict) {
 	}
 
 	// Propose mode, or per-asset confirmation required: never auto-send.
+	// Register the candidate so Telegram's inline buttons and the API's
+	// approve/reject endpoints can resolve it later by id.
 	if e.Mode() != "autonomous" || v.RequiresConfirmation {
+		p := e.proposals.Add(v)
 		e.bus.PublishJournal(bus.JournalEvent{
 			Coin: v.Asset, Kind: "alert",
-			Summary: "PROPOSED (awaiting confirmation): " + candidateSummary(v),
+			Summary: fmt.Sprintf("PROPOSED (awaiting confirmation): id=%s %s", p.ID, candidateSummary(v)),
 			Verdict: &v,
 		})
 		return
@@ -174,6 +185,32 @@ func (e *Executor) Execute(ctx context.Context, v reasoner.Verdict) error {
 	}
 	_ = e.journal.Record(journal.Entry{
 		Coin: v.Asset, Kind: "fill", Summary: "submitted (mcp): " + candidateSummary(v), Verdict: &v,
+	})
+	return nil
+}
+
+// Approve resolves a pending proposal by id and runs it through Execute (risk
+// gates + submit). It is the single confirm path both Telegram's inline
+// buttons and the API's approve endpoint call.
+func (e *Executor) Approve(ctx context.Context, id string) error {
+	p, ok := e.proposals.Take(id)
+	if !ok {
+		return fmt.Errorf("no such proposal")
+	}
+	return e.Execute(ctx, p.Verdict)
+}
+
+// Reject resolves a pending proposal by id and journals a "rejected" alert
+// without ever signing or submitting anything.
+func (e *Executor) Reject(id string) error {
+	p, ok := e.proposals.Take(id)
+	if !ok {
+		return fmt.Errorf("no such proposal")
+	}
+	_ = e.journal.Record(journal.Entry{
+		Coin: p.Verdict.Asset, Kind: "alert",
+		Summary: "rejected: " + candidateSummary(p.Verdict),
+		Verdict: &p.Verdict,
 	})
 	return nil
 }

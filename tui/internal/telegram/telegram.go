@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/hyperagent/hyperagent/internal/bus"
@@ -61,13 +62,34 @@ func (c *Client) Mirror(ctx context.Context, b *bus.Bus) {
 
 func (c *Client) handle(ctx context.Context, ev bus.JournalEvent) {
 	text := fmt.Sprintf("*%s* `%s`\n%s", escapeMD(ev.Coin), ev.Kind, escapeMD(ev.Summary))
-	// Proposed candidates awaiting confirmation get inline buttons.
+	// Proposed candidates awaiting confirmation get inline buttons, keyed by
+	// the id the executor's shared proposal registry assigned — embedded in
+	// Summary as "id=<id>" so Telegram and the API resolve the same proposal.
 	if ev.Kind == "alert" && ev.Verdict != nil {
-		id := fmt.Sprintf("%s_%d", ev.Coin, ev.Verdict.At.UnixNano())
-		c.sendWithButtons(ctx, text, id)
-		return
+		if id, ok := proposalID(ev.Summary); ok {
+			c.sendWithButtons(ctx, text, id)
+			return
+		}
 	}
 	c.send(ctx, text)
+}
+
+// proposalID extracts the "id=<id>" token the executor embeds in a proposed
+// candidate's journal summary.
+func proposalID(summary string) (string, bool) {
+	const marker = "id="
+	idx := strings.Index(summary, marker)
+	if idx < 0 {
+		return "", false
+	}
+	rest := summary[idx+len(marker):]
+	if end := strings.IndexByte(rest, ' '); end >= 0 {
+		rest = rest[:end]
+	}
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
 }
 
 func (c *Client) send(ctx context.Context, text string) {
