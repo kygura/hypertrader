@@ -60,6 +60,54 @@ claude mcp add hypertrader -- /path/to/hyperagent mcp -address 0xYOURMASTER
 it account tools are disabled and exposure gates run blind. All MCP orders are
 journaled like any other candidate.
 
+## HTTP API
+
+The same core the TUI and MCP server run on — store, digests, verdicts,
+journal, chat, gated execution — is also reachable over HTTP+WS, so any
+frontend (the web dashboard, a script, `curl`) can attach without going
+through a Claude client. Runs in both TUI and headless modes whenever
+`[api] enabled = true`; binds loopback by default.
+
+```sh
+./hyperagent -headless -testnet &
+curl -s localhost:8787/api/health
+```
+
+| Method & path | Needs key? | Does |
+|---|---|---|
+| `GET /api/health` | no | connection state, mode, active providers, version |
+| `GET /api/markets` | no | latest derived metrics per tracked coin; 404 while the store warms |
+| `GET /api/bars/{coin}?tf=1h&n=100` | no | OHLCV + metric history; 404 if empty |
+| `GET /api/digests/{coin}` | no | latest frozen digest; 404 if none yet |
+| `GET /api/verdicts` | no | latest verdict/thesis per asset, newest-first (`[]` if none) |
+| `GET /api/journal?date=YYYY-MM-DD` | no | journal entries for a day (default today UTC) |
+| `POST /api/chat` | a chat provider key | `{message, history[]}` → `{reply, provider, model}`; 503 with no engine, 502 on provider error |
+| `GET /api/proposals` | no | pending propose-mode candidates |
+| `POST /api/proposals/{id}/approve` | `HL_AGENT_KEY` | confirm flow, same risk gates as Telegram; 422 names the gate on rejection |
+| `POST /api/proposals/{id}/reject` | no | drop a pending proposal |
+| `POST /api/orders` | `HL_AGENT_KEY` | direct order through the risk gates (same semantics as MCP `place_order`); 503 with no signer |
+| `DELETE /api/orders/{coin}/{oid}` | `HL_AGENT_KEY` | cancel by oid |
+| `GET /api/ws` | no | push stream — frames `{"topic":"bar\|verdict\|journal\|status\|mids","data":{...}}` |
+
+Every error response is `{"error":"..."}`; risk-gate rejections are always 422.
+
+Config (`[api]` in `config.toml`):
+
+```toml
+[api]
+enabled = true
+addr    = "127.0.0.1:8787"
+# token = ""   # optional; when set, Bearer auth required (needed off-localhost)
+cors_origins = ["http://localhost:5173"]
+```
+
+Default bind is loopback-only with no auth — fine for a single-operator
+workstation. Setting a non-loopback `addr` with an empty `token` is a startup
+error: the daemon refuses to open the execution surface to the network
+unauthenticated. Once `token` is set, every `/api/` request needs
+`Authorization: Bearer <token>` (and `/api/ws` accepts the same token via
+`?token=` query param, since browsers can't set WS request headers).
+
 ## Signing guarantees
 
 - L1 actions: msgpack action-hash + phantom-Agent EIP-712 envelope.
