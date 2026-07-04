@@ -10,3 +10,4 @@ graphify-out/
 backend/data/
 .claude/
 .atl/
+.codegraph/
