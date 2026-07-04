@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Compile and run in a single step via `go run` — no separate binary artifact.
 # Arguments are forwarded to the program, e.g.:
-#   ./dev.sh                  # normal (TUI)
+#   ./dev.sh                  # daemon: pipeline + HTTP/WS API, no TUI
 #   ./dev.sh -testnet         # Hyperliquid testnet
-#   ./dev.sh -headless        # daemon, no TUI
 #   ./dev.sh -config foo.toml # alternate config
 #
 # Runs from the repo root so config.toml and ./data resolve correctly.

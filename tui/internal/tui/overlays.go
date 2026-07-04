@@ -305,8 +305,9 @@ func (m *Model) jumpToCoin(coin string) {
 
 // generateThesis generates a HL-data-grounded thesis for the selected asset.
 // When ThesisFn is wired it fetches fresh multi-TF perp data first (async),
-// then submits to the chat LLM with that as context. Without ThesisFn it falls
-// back to the live store context path — never a silent failure.
+// then submits to the chat LLM with that as context. Without ThesisFn it
+// submits a generic (ungrounded) thesis prompt via submitChat — never a
+// silent failure.
 func (m *Model) generateThesis() tea.Cmd {
 	coin := m.selectedCoin()
 	if coin == "" {

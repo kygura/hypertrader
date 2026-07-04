@@ -41,7 +41,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case barMsg:
-		// Live data refresh: re-render pulls from the store, nothing to store here.
+		// Live data refresh: re-render pulls from the cache, nothing to store here.
 		return m, nil
 
 	case verdictMsg:
@@ -144,7 +144,7 @@ type statusClearMsg struct{ seq int }
 
 // thesisContextMsg carries the result of the async HL data fetch kicked off by
 // generateThesis. On success, context holds the multi-TF grounding block; on
-// error, submitChatWithCtx falls back to the live store context.
+// error, submitChatWithCtx proceeds with no extra grounding block.
 type thesisContextMsg struct {
 	coin    string
 	tf      string

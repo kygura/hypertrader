@@ -107,7 +107,7 @@ func (m *Model) sortMetric(coin string) float64 {
 }
 
 // marketRowData is one asset's precomputed display values, gathered once per render
-// so each column reads from a struct rather than re-hitting the store.
+// so each column reads from a struct rather than re-hitting the cache.
 type marketRowData struct {
 	coin            string
 	idx             int
