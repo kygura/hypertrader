@@ -1,20 +1,27 @@
-// The channel→Msg bridge. THIS FILE IS A COMPILE-TIME STUB for Task 8: it
-// defines the tea.Msg envelope types the rest of the package (chiefly
-// update.go) switches on, backed by apiclient types instead of the backend's
-// internal bus/metrics packages. Nothing populates these yet — Task 9
-// rewrites this file into a real WebSocket client that dispatches these (or
-// equivalent) messages from the daemon's /ws push stream. The render loop
-// still never blocks on network or LLM once that lands.
+// The channel→Msg bridge: a real WebSocket client consuming the daemon's
+// /api/ws push stream. Bar/mids updates apply directly to the cache;
+// verdict/journal/status frames are forwarded into the Bubble Tea program as
+// the same message types Update already switches on. The render loop never
+// blocks on network or LLM — all of this runs off the UI goroutine, dispatched
+// via tea.Program.Send (safe to call concurrently; see PumpWS's doc comment).
 package tui
 
 import (
+	"context"
+	"encoding/json"
+	"log"
+	"net/url"
+	"time"
+
 	tea "charm.land/bubbletea/v2"
+	"github.com/gorilla/websocket"
 
 	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // Sender is the minimal interface the bridge needs from a tea.Program. Kept
-// here so Task 9's WS client can depend on it without touching call sites.
+// here so it can be depended on without pulling in bubbletea in places that
+// only need to send messages (e.g. tests).
 type Sender interface {
 	Send(tea.Msg)
 }
@@ -35,8 +42,8 @@ const (
 )
 
 // Tea messages the render loop reacts to, mirroring the shape of
-// backend/internal/bus events. Task 9's WS client produces these from real
-// server push frames.
+// backend/internal/bus events. PumpWS produces these from real server push
+// frames.
 type (
 	barMsg     apiclient.Bar
 	verdictMsg apiclient.Verdict
@@ -65,3 +72,119 @@ type (
 		err  error
 	}
 )
+
+// wsFrame mirrors the {"topic":...,"data":...} envelope backend/internal/api/ws.go writes.
+type wsFrame struct {
+	Topic string          `json:"topic"`
+	Data  json.RawMessage `json:"data"`
+}
+
+// PumpWS connects to the daemon's /api/ws, applies bar/mids updates directly
+// to cache, and forwards verdict/journal/status frames into the Bubble Tea
+// program as the same message types Update already switches on. Reconnects
+// with capped exponential backoff on any read/dial error; blocks until ctx
+// is cancelled.
+//
+// httpBaseURL is the daemon's HTTP base URL (e.g. "http://127.0.0.1:8787"),
+// the same value passed to apiclient.New — PumpWS derives the ws(s)://.../api/ws
+// URL from it via wsURLFrom, since that helper is unexported and callers in
+// package main cannot invoke it directly.
+func PumpWS(ctx context.Context, httpBaseURL string, cache *apiclient.Cache, p *tea.Program) {
+	wsURL := wsURLFrom(httpBaseURL)
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+		if err != nil {
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+		backoff = time.Second
+		readLoop(ctx, conn, cache, p)
+		conn.Close()
+	}
+}
+
+func readLoop(ctx context.Context, conn *websocket.Conn, cache *apiclient.Cache, p *tea.Program) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var f wsFrame
+		if json.Unmarshal(data, &f) != nil {
+			continue
+		}
+		switch f.Topic {
+		case "bar":
+			var b apiclient.Bar
+			if json.Unmarshal(f.Data, &b) == nil {
+				cache.PutBar(b)
+				p.Send(barMsg{})
+			}
+		case "mids":
+			var m struct{ Mids map[string]float64 }
+			if json.Unmarshal(f.Data, &m) == nil {
+				for coin, px := range m.Mids {
+					cache.PutMid(coin, px)
+				}
+			}
+		case "verdict":
+			var v apiclient.Verdict
+			if json.Unmarshal(f.Data, &v) == nil {
+				p.Send(verdictMsg(v))
+			}
+		case "journal":
+			var e journalMsg
+			if json.Unmarshal(f.Data, &e) == nil {
+				p.Send(e)
+			}
+		case "status":
+			var s statusMsg
+			if json.Unmarshal(f.Data, &s) == nil {
+				p.Send(s)
+			}
+		}
+	}
+}
+
+func wsURLFrom(httpBaseURL string) string {
+	u, err := url.Parse(httpBaseURL)
+	if err != nil {
+		log.Printf("tui: bad base url %q: %v", httpBaseURL, err)
+		return httpBaseURL
+	}
+	if u.Scheme == "https" {
+		u.Scheme = "wss"
+	} else {
+		u.Scheme = "ws"
+	}
+	u.Path = "/api/ws"
+	return u.String()
+}
+
+// PollMarkets refreshes AssetCtx/Position for the whole visualized watchlist
+// every 5s — there is no WS topic for either today. Blocks until ctx is done.
+func PollMarkets(ctx context.Context, client *apiclient.Client, cache *apiclient.Cache, p *tea.Program) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			entries, err := client.Markets(ctx)
+			if err == nil {
+				cache.ApplyMarkets(entries)
+				p.Send(barMsg{})
+			}
+		}
+	}
+}
