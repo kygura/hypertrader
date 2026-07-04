@@ -116,25 +116,26 @@ func (a Action) IsTrade() bool {
 
 // Verdict mirrors backend/internal/metrics.Verdict.
 type Verdict struct {
-	Asset                string
-	Timeframe            string
-	Action               Action
-	SizeUSD              float64
-	Entry                Entry
-	Stop, TakeProfit     float64
-	Thesis               string
-	Reading              string
-	Confidence           float64
-	RequiresConfirmation bool
+	Asset                string  `json:"asset"`
+	Timeframe            string  `json:"timeframe"`
+	Action               Action  `json:"action"`
+	SizeUSD              float64 `json:"size_usd"`
+	Entry                Entry   `json:"entry"`
+	Stop                 float64 `json:"stop"`
+	TakeProfit           float64 `json:"take_profit"`
+	Thesis               string  `json:"thesis"`
+	Reading              string  `json:"reading"`
+	Confidence           float64 `json:"confidence"`
+	RequiresConfirmation bool    `json:"requires_confirmation"`
 
-	At       time.Time
-	Provider string
+	At       time.Time `json:"-"`
+	Provider string    `json:"-"`
 }
 
 // Entry mirrors backend/internal/metrics.Entry.
 type Entry struct {
-	Type  string
-	Price float64
+	Type  string  `json:"type"`
+	Price float64 `json:"price,omitempty"`
 }
 
 // ChatTurn mirrors backend/internal/reasoner.ChatTurn (json tags role/text).
