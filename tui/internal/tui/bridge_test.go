@@ -141,8 +141,10 @@ func TestPumpWSForwardsBarAndStatusFrames(t *testing.T) {
 
 // TestPumpWSReconnectsOnImmediateClose points PumpWS at a server that accepts
 // the WS upgrade and immediately closes the connection, then asserts a
-// second connection attempt happens (observed via a counter incremented on
-// every upgrade) within the first backoff step.
+// second connection attempt eventually happens (observed via a counter
+// incremented on every upgrade). Backoff now escalates after a quick drop
+// (see TestPumpWSBacksOffAfterQuickDrop for the timing assertion), so the
+// wait window here is generous rather than tight.
 func TestPumpWSReconnectsOnImmediateClose(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var mu sync.Mutex
@@ -170,11 +172,110 @@ func TestPumpWSReconnectsOnImmediateClose(t *testing.T) {
 
 	go PumpWS(ctx, srv.URL, cache, p)
 
-	waitForCondition(t, 3*time.Second, func() bool {
+	waitForCondition(t, 5*time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return attempts >= 2
 	})
+}
+
+// TestPumpWSBacksOffAfterQuickDrop is the fix's proof: before the fix,
+// backoff only applied on dial failure, so a server that upgrades and then
+// immediately closes caused PumpWS to redial at native loop speed (the old
+// version of this test completed in ~20ms for several full cycles). This
+// test asserts the gap between the first and second connection attempts is
+// now at least 1s — the escalated backoff after a drop well under
+// healthyConnDuration — proving backoff applies to post-connect drops too,
+// not just dial errors.
+func TestPumpWSBacksOffAfterQuickDrop(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var mu sync.Mutex
+	attempts := 0
+	first := make(chan time.Time, 1)
+	second := make(chan time.Time, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		switch n {
+		case 1:
+			select {
+			case first <- time.Now():
+			default:
+			}
+		case 2:
+			select {
+			case second <- time.Now():
+			default:
+			}
+		}
+		conn.Close() // immediately drop — forces PumpWS's readLoop to return and retry
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cache := apiclient.NewCache()
+	p, _ := newTestProgram(ctx)
+	go func() { _, _ = p.Run() }()
+	defer p.Kill()
+
+	go PumpWS(ctx, srv.URL, cache, p)
+
+	var t1, t2 time.Time
+	select {
+	case t1 = <-first:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first connection attempt never happened")
+	}
+	select {
+	case t2 = <-second:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second connection attempt never happened")
+	}
+
+	if gap := t2.Sub(t1); gap < time.Second {
+		t.Fatalf("reconnect after a quick drop happened too fast (%s); expected escalated backoff (>=1s) to apply, not just on dial failure", gap)
+	}
+}
+
+// TestNextBackoff unit-tests the reset-vs-escalate decision in isolation
+// from real dial/read timing, so the policy (escalate on dial failure or a
+// quick drop, reset to base once a connection proves itself healthy) is
+// covered by a fast, deterministic test alongside the real-timing proof
+// above.
+func TestNextBackoff(t *testing.T) {
+	const maxBackoff = 30 * time.Second
+
+	cases := []struct {
+		name        string
+		prevBackoff time.Duration
+		upDuration  time.Duration
+		want        time.Duration
+	}{
+		{"dial failure escalates", 1 * time.Second, 0, 2 * time.Second},
+		{"quick drop escalates", 2 * time.Second, 500 * time.Millisecond, 4 * time.Second},
+		{"drop just under threshold still escalates", 4 * time.Second, healthyConnDuration - time.Millisecond, 8 * time.Second},
+		{"healthy connection resets to base", 16 * time.Second, healthyConnDuration, time.Second},
+		{"long-lived connection resets to base", 16 * time.Second, time.Minute, time.Second},
+		{"escalation is capped at maxBackoff", maxBackoff, 0, maxBackoff},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextBackoff(tc.prevBackoff, tc.upDuration, maxBackoff)
+			if got != tc.want {
+				t.Fatalf("nextBackoff(%s, %s, %s) = %s, want %s", tc.prevBackoff, tc.upDuration, maxBackoff, got, tc.want)
+			}
+		})
+	}
 }
 
 func mustMarshalFrame(t *testing.T, topic string, data json.RawMessage) []byte {

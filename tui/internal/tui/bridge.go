@@ -79,11 +79,55 @@ type wsFrame struct {
 	Data  json.RawMessage `json:"data"`
 }
 
+// healthyConnDuration is how long a connection has to stay up before we
+// treat its eventual drop as unrelated to daemon/network health and reset
+// backoff to base. 3s is comfortably longer than a TCP handshake plus a
+// WS upgrade plus the first few push frames, so a connection that clears
+// this bar has demonstrably done real work; anything shorter (including a
+// connection that never dialed at all) reads as a flapping proxy or a
+// daemon rejecting connections post-handshake, so backoff keeps escalating
+// instead of resetting.
+const healthyConnDuration = 3 * time.Second
+
+// nextBackoff decides the backoff to use for the *next* reconnect attempt,
+// given the backoff used for the attempt that just ended and how long the
+// resulting connection stayed up (pass 0 if the dial itself failed — that
+// is indistinguishable from a connection that dropped instantly). Kept as
+// a pure function so the reset-vs-escalate decision can be unit tested
+// without driving a real dial/read loop.
+func nextBackoff(prevBackoff, upDuration, maxBackoff time.Duration) time.Duration {
+	if upDuration >= healthyConnDuration {
+		return time.Second
+	}
+	next := prevBackoff * 2
+	if next > maxBackoff {
+		next = maxBackoff
+	}
+	return next
+}
+
+// sleepCtx blocks for d or until ctx is done, whichever comes first. It
+// returns false if ctx ended the wait early, so callers can bail out of a
+// retry loop instead of sleeping past cancellation.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // PumpWS connects to the daemon's /api/ws, applies bar/mids updates directly
 // to cache, and forwards verdict/journal/status frames into the Bubble Tea
 // program as the same message types Update already switches on. Reconnects
-// with capped exponential backoff on any read/dial error; blocks until ctx
-// is cancelled.
+// with capped exponential backoff on every failed attempt — whether the
+// dial itself failed or the connection dialed fine but dropped again in
+// under healthyConnDuration (see nextBackoff). A connection that stays up
+// at least that long is treated as healthy and backoff resets to base
+// before the next attempt. Blocks until ctx is cancelled.
 //
 // httpBaseURL is the daemon's HTTP base URL (e.g. "http://127.0.0.1:8787"),
 // the same value passed to apiclient.New — PumpWS derives the ws(s)://.../api/ws
@@ -97,15 +141,27 @@ func PumpWS(ctx context.Context, httpBaseURL string, cache *apiclient.Cache, p *
 		if ctx.Err() != nil {
 			return
 		}
+		dialStart := time.Now()
 		conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 		if err != nil {
-			time.Sleep(backoff)
-			backoff = min(backoff*2, maxBackoff)
+			backoff = nextBackoff(backoff, 0, maxBackoff)
+			if !sleepCtx(ctx, backoff) {
+				return
+			}
 			continue
 		}
-		backoff = time.Second
 		readLoop(ctx, conn, cache, p)
 		conn.Close()
+		up := time.Since(dialStart)
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		backoff = nextBackoff(backoff, up, maxBackoff)
+		if !sleepCtx(ctx, backoff) {
+			return
+		}
 	}
 }
 
