@@ -15,6 +15,7 @@ import (
 	"github.com/hyperagent/hyperagent/internal/bus"
 	"github.com/hyperagent/hyperagent/internal/config"
 	"github.com/hyperagent/hyperagent/internal/executor"
+	"github.com/hyperagent/hyperagent/internal/hlclient"
 	"github.com/hyperagent/hyperagent/internal/ingestor"
 	"github.com/hyperagent/hyperagent/internal/metrics"
 	"github.com/hyperagent/hyperagent/internal/reasoner"
@@ -33,6 +34,8 @@ type Deps struct {
 	Batcher  *batcher.Batcher   // nil → watchlist track/untrack/scan endpoints return 503
 	Cfg      config.Config
 	Version  string
+
+	RestClient *hlclient.Client // nil → thesis passthrough endpoint returns 503
 
 	// SaveConfig persists a mutation to config.toml under the caller's own
 	// guard (mutex + atomic write); nil disables persistence (settings still
@@ -114,6 +117,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	s.mux.HandleFunc("PUT /api/execution/mode", s.handlePutMode)
 	s.mux.HandleFunc("PUT /api/providers/{name}/key", s.handlePutProviderKey)
+	s.mux.HandleFunc("GET /api/thesis/{coin}", s.handleThesis)
 }
 
 // runCaches is the single owner of serverState: it subscribes once per topic
