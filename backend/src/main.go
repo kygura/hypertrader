@@ -1,17 +1,18 @@
 // Command hyperagent is the single static binary: an autonomous Hyperliquid
-// scanner and reasoning engine with a Bubble Tea TUI. It wires every component
-// over the typed event bus, one goroutine per component, context for shutdown.
+// scanner and reasoning engine, headless daemon plus HTTP+WS API. It wires
+// every component over the typed event bus, one goroutine per component,
+// context for shutdown.
 //
 // Build order maps to the plan's stages; this entrypoint runs stages 1–3 live
-// (ingest → aggregate → store → batch → gate → reason → journal → TUI) and wires
+// (ingest → aggregate → store → batch → gate → reason → journal) and wires
 // stage 4 (executor) in propose mode by default. Autonomous execution requires
-// both config mode=autonomous and an agent wallet key.
+// both config mode=autonomous and an agent wallet key. Every frontend —
+// standalone TUI included — attaches to the API server, not this process.
 package main
 
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -19,9 +20,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/hyperagent/hyperagent/internal/aggregator"
 	"github.com/hyperagent/hyperagent/internal/api"
@@ -39,8 +37,6 @@ import (
 	"github.com/hyperagent/hyperagent/internal/signing"
 	"github.com/hyperagent/hyperagent/internal/store"
 	"github.com/hyperagent/hyperagent/internal/telegram"
-	"github.com/hyperagent/hyperagent/internal/thesis"
-	"github.com/hyperagent/hyperagent/internal/tui"
 )
 
 // version is the daemon build identifier reported by /api/health and the MCP
@@ -69,7 +65,6 @@ func main() {
 	var (
 		configPath = flag.String("config", "config.toml", "path to config.toml")
 		testnet    = flag.Bool("testnet", false, "use Hyperliquid testnet endpoints")
-		headless   = flag.Bool("headless", false, "run the daemon without the TUI")
 		agentKey   = flag.String("agent-key", os.Getenv("HL_AGENT_KEY"), "agent wallet private key (autonomous execution)")
 	)
 	flag.Parse()
@@ -79,7 +74,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	if err := run(cfg, *configPath, *testnet, *headless, *agentKey); err != nil {
+	if err := run(cfg, *configPath, *testnet, *agentKey); err != nil {
 		log.Fatalf("hyperagent: %v", err)
 	}
 }
@@ -111,7 +106,7 @@ func loadDotEnv(path string) {
 	}
 }
 
-func run(cfg config.Config, configPath string, testnet, headless bool, agentKey string) error {
+func run(cfg config.Config, configPath string, testnet bool, agentKey string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -197,23 +192,35 @@ func run(cfg config.Config, configPath string, testnet, headless bool, agentKey 
 		go tg.PollCallbacks(ctx)
 	}
 
-	// --- API server (unified backend core): same deps the TUI model holds,
-	// started for both TUI and headless modes so any frontend attaches to one
-	// process. Constructed (and its status/bus subscriptions live) before the
-	// pipeline goroutines below start publishing, so the initial status event
-	// isn't missed. Runs until ctx is cancelled (SIGINT/SIGTERM or TUI exit).
+	// --- API server (unified backend core): the surface every frontend
+	// (standalone TUI included) attaches to. Constructed (and its status/bus
+	// subscriptions live) before the pipeline goroutines below start
+	// publishing, so the initial status event isn't missed. Runs until ctx is
+	// cancelled (SIGINT/SIGTERM).
 	if cfg.API.Enabled {
+		var cfgMu sync.Mutex
 		srv := api.NewServer(api.Deps{
-			Bus:     b,
-			Store:   st,
-			Engine:  engine,
-			Exec:    exec,
-			Cfg:     cfg,
-			Version: version,
+			Bus:        b,
+			Store:      st,
+			Engine:     engine,
+			Exec:       exec,
+			Ingestor:   in,
+			Batcher:    bt,
+			RestClient: rest,
+			Cfg:        cfg,
+			Version:    version,
+			CfgSnapshot: func() config.Config {
+				cfgMu.Lock()
+				defer cfgMu.Unlock()
+				return cfg
+			},
+			SaveConfig: func(apply func(*config.Config)) error {
+				cfgMu.Lock()
+				defer cfgMu.Unlock()
+				apply(&cfg)
+				return config.Save(configPath, cfg)
+			},
 		})
-		if headless {
-			fmt.Fprintf(os.Stderr, "hyperagent api: listening on %s\n", cfg.API.Addr)
-		}
 		go func() {
 			if err := srv.ListenAndServe(ctx); err != nil {
 				log.Printf("api server: %v", err)
@@ -230,89 +237,8 @@ func run(cfg config.Config, configPath string, testnet, headless bool, agentKey 
 
 	b.PublishStatus(bus.StatusEvent{Kind: bus.StatusConn, Connected: false, Provider: cfg.Reasoner.ChatProvider, Mode: cfg.Execution.Mode, Detail: "starting"})
 
-	if headless {
-		return runHeadless(ctx, b)
-	}
-	controls := buildControls(cfg, configPath, in, bt, reg, exec)
-	return runTUI(ctx, cancel, cfg, b, st, engine, rest, controls)
-}
-
-// buildControls wires the TUI's configuration commands to the live backend
-// components: /watch → ingestor subscribe, /track → batcher, /provider →
-// registry, /mode → executor. Each is a thin intent applied to running state.
-// The settings hooks additionally persist to config.toml (under one mutex), so
-// model selections, API keys, and the execution mode survive a restart.
-func buildControls(cfg config.Config, configPath string, in *ingestor.Ingestor, bt *batcher.Batcher, reg *reasoner.Registry, exec *executor.Executor) tui.Controls {
-	confirm := cfg.Execution.Mode != "autonomous"
-
-	// One mutex guards the cfg copy + file; every persist goes through here.
-	var cfgMu sync.Mutex
-	persist := func(apply func(*config.Config)) error {
-		cfgMu.Lock()
-		defer cfgMu.Unlock()
-		apply(&cfg)
-		return config.Save(configPath, cfg)
-	}
-
-	c := tui.Controls{
-		Subscribe: in.Subscribe,
-		Track: func(coin, tf string) {
-			bt.Track(metrics.AssetStrategy{
-				Coin:                 coin,
-				Timeframe:            tf,
-				RequiresConfirmation: confirm,
-				MaxPositionUSD:       cfg.Execution.MaxPositionUSD,
-			})
-		},
-		Untrack:        bt.Untrack,
-		ScanNow:        bt.Scan,
-		SetProvider:    reg.SetProvider,
-		ProviderNames:  reg.Names,
-		SetModel:       reg.SetModel,
-		ActiveModel:    reg.Active,
-		ProviderModels: reg.ProviderModels,
-
-		SaveSettings: func(s tui.Settings) error {
-			return persist(func(c *config.Config) {
-				c.Reasoner.ChatProvider = s.ChatProvider
-				c.Reasoner.ChatModel = s.ChatModel
-				c.Reasoner.BatchProvider = s.BatchProvider
-				c.Reasoner.BatchModel = s.BatchModel
-				if s.Mode != "" {
-					c.Execution.Mode = s.Mode
-				}
-			})
-		},
-
-		SetAPIKey: func(name, key string) error {
-			// Apply live: rebuild the adapter with the new key and swap it in.
-			cfgMu.Lock()
-			pc, ok := providerCfgFor(cfg, name)
-			cfgMu.Unlock()
-			if !ok {
-				return fmt.Errorf("unknown provider %q", name)
-			}
-			if err := reg.Replace(name, buildProvider(name, pc, key)); err != nil {
-				return err
-			}
-			// Persist: the key lands in config.toml (written 0600).
-			return persist(func(c *config.Config) { setProviderKey(c, name, key) })
-		},
-
-		KeyHint: func(name string) string {
-			cfgMu.Lock()
-			defer cfgMu.Unlock()
-			pc, ok := providerCfgFor(cfg, name)
-			if !ok {
-				return ""
-			}
-			return maskKey(pc.Key(strings.ToUpper(name) + "_API_KEY"))
-		},
-	}
-	if exec != nil {
-		c.SetMode = exec.SetMode
-	}
-	return c
+	<-ctx.Done()
+	return nil
 }
 
 // buildTimeframes returns, per visualized coin, the timeframes the aggregator
@@ -562,82 +488,4 @@ func tfDur(tf string) time.Duration {
 		return t.Dur
 	}
 	return time.Hour
-}
-
-// runTUI starts the Bubble Tea program and bridges the bus into it.
-func runTUI(ctx context.Context, cancel context.CancelFunc, cfg config.Config, b *bus.Bus, st *store.Store, engine *reasoner.Engine, rest *hlclient.Client, controls tui.Controls) error {
-	hasDarkBG := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
-	theme := tui.NewTheme(hasDarkBG)
-
-	tfs := map[string]string{}
-	for _, coin := range cfg.Markets.Visualized {
-		tfs[coin] = cfg.Timeframe.For(coin)
-	}
-
-	model := tui.New(tui.Config{
-		Theme:      theme,
-		Store:      st,
-		Visualized: cfg.Markets.Visualized,
-		Tracked:    cfg.Markets.Tracked,
-		Timeframes: tfs,
-		Mode:       cfg.Execution.Mode,
-		Provider:   engine.ChatProviderName(),
-		Risk: tui.RiskView{
-			MaxPositionUSD:      cfg.Execution.MaxPositionUSD,
-			MaxTotalExposureUSD: cfg.Execution.MaxTotalExposureUSD,
-			MaxConcurrent:       cfg.Execution.MaxConcurrent,
-			DailyLossKillUSD:    cfg.Execution.DailyLossKillUSD,
-		},
-		ChatFn:        engine.Chat,
-		ThesisFn:      func(ctx context.Context, coin, displayTF string) (string, error) {
-			return thesis.FetchContext(ctx, rest, coin, displayTF)
-		},
-		Controls:      controls,
-		WatchlistPath: cfg.Storage.Dir + "/watchlist.json",
-	})
-
-	p := tea.NewProgram(model, tea.WithContext(ctx))
-	tui.PumpBus(ctx, b, p)
-
-	// Redraw periodically so live store updates surface even without bus pushes.
-	go func() {
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				p.Send(redrawMsg{})
-			}
-		}
-	}()
-
-	_, err := p.Run()
-	cancel()
-	return err
-}
-
-type redrawMsg struct{}
-
-// runHeadless runs without the TUI, logging journal + status events to stderr.
-func runHeadless(ctx context.Context, b *bus.Bus) error {
-	jev := b.SubscribeJournal(256)
-	sev := b.SubscribeStatus(64)
-	fmt.Fprintln(os.Stderr, "hyperagent running headless; Ctrl-C to stop")
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case e := <-jev:
-			log.Printf("[%s] %s: %s", e.Kind, e.Coin, e.Summary)
-		case s := <-sev:
-			switch {
-			case s.Kind == bus.StatusConn:
-				log.Printf("[conn] connected=%v %s", s.Connected, s.Detail)
-			case s.Detail != "":
-				log.Printf("[notice] %s", s.Detail)
-			}
-		}
-	}
 }

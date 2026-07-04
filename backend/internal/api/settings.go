@@ -56,7 +56,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	hints := map[string]string{}
 	for _, name := range reg.Names() {
-		if pc, ok := providerCfgFor(s.deps.Cfg, name); ok {
+		if pc, ok := providerCfgFor(s.deps.CfgSnapshot(), name); ok {
 			hints[name] = maskKey(pc.Key(strings.ToUpper(name) + "_API_KEY"))
 		}
 	}
@@ -170,7 +170,7 @@ func (s *Server) handlePutProviderKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	pc, ok := providerCfgFor(s.deps.Cfg, name)
+	pc, ok := providerCfgFor(s.deps.CfgSnapshot(), name)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "unknown provider %q", name)
 		return

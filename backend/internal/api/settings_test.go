@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -100,7 +101,7 @@ func TestSettingsGetHappyPath(t *testing.T) {
 	cfg := config.Default()
 	cfg.Markets = config.Markets{Visualized: []string{"BTC", "ETH"}, Tracked: []string{"BTC"}}
 	cfg.Execution.MaxPositionUSD = 5000
-	srv := newSettingsTestServer(t, Deps{Engine: engine, Cfg: cfg})
+	srv := newSettingsTestServer(t, Deps{Engine: engine, Cfg: cfg, CfgSnapshot: func() config.Config { return cfg }})
 
 	var body settingsResponse
 	resp, err := srv.Client().Get(srv.URL + "/api/settings")
@@ -144,7 +145,7 @@ func TestSettingsGetHappyPath(t *testing.T) {
 func TestSettingsPutSwitchesChatModelOnly(t *testing.T) {
 	engine := newSettingsTestEngine(t)
 	cfg := config.Default()
-	srv := newSettingsTestServer(t, Deps{Engine: engine, Cfg: cfg})
+	srv := newSettingsTestServer(t, Deps{Engine: engine, Cfg: cfg, CfgSnapshot: func() config.Config { return cfg }})
 
 	resp := putJSON(t, srv, "/api/settings", map[string]any{"chat_model": "gpt-4o-mini"}, nil)
 	defer resp.Body.Close()
@@ -238,7 +239,8 @@ func TestSettingsPutModePropose(t *testing.T) {
 
 func TestSettingsPutProviderKeyUnknownReturns404(t *testing.T) {
 	engine := newSettingsTestEngine(t)
-	srv := newSettingsTestServer(t, Deps{Engine: engine, Cfg: config.Default()})
+	cfg := config.Default()
+	srv := newSettingsTestServer(t, Deps{Engine: engine, Cfg: cfg, CfgSnapshot: func() config.Config { return cfg }})
 
 	resp := putJSON(t, srv, "/api/providers/nope/key", map[string]any{"key": "sk-test"}, nil)
 	defer resp.Body.Close()
@@ -248,15 +250,10 @@ func TestSettingsPutProviderKeyUnknownReturns404(t *testing.T) {
 }
 
 // TestSettingsPutProviderKeySetsAndMasksHint exercises a *custom* provider
-// name rather than "anthropic": providerCfgFor stores custom providers in
-// Cfg.Providers.Custom, a map, and maps are reference types in Go — the same
-// underlying table survives the value-copy of Deps.Cfg into Server, so a key
-// written through Deps.SaveConfig's closure is actually visible to a later
-// GET. The three named providers (anthropic/openai/deepseek) are plain struct
-// fields, not maps, so a SaveConfig mutation to those would NOT be visible
-// through this same Deps.Cfg snapshot until main.go (Task 5) rewires the
-// server to see a live Cfg; that's out of scope here, so this test picks the
-// provider shape that already round-trips correctly today.
+// name ("local-llm", stored in Cfg.Providers.Custom, a map). Deps.CfgSnapshot
+// here mirrors main.go's real wiring: a mutex-guarded closure returning the
+// live cfg value SaveConfig mutates, so a key written through SaveConfig's
+// closure is visible to a later GET.
 func TestSettingsPutProviderKeySetsAndMasksHint(t *testing.T) {
 	custom := &fakeChatProvider{name: "local-llm", reply: "ok"}
 	reg := reasoner.NewRegistry(
@@ -271,11 +268,19 @@ func TestSettingsPutProviderKeySetsAndMasksHint(t *testing.T) {
 	cfg.Providers.Custom = map[string]config.ProviderCfg{
 		"local-llm": {Model: "model-a", BaseURL: "http://localhost:11434"},
 	}
+	var mu sync.Mutex
 	var savedKey string
 	deps := Deps{
 		Engine: engine,
 		Cfg:    cfg,
+		CfgSnapshot: func() config.Config {
+			mu.Lock()
+			defer mu.Unlock()
+			return cfg
+		},
 		SaveConfig: func(apply func(*config.Config)) error {
+			mu.Lock()
+			defer mu.Unlock()
 			apply(&cfg)
 			savedKey = cfg.Providers.Custom["local-llm"].APIKey
 			return nil
@@ -307,6 +312,61 @@ func TestSettingsPutProviderKeySetsAndMasksHint(t *testing.T) {
 	}
 	if strings.Contains(hint, "sk-test-raw-secret-value") {
 		t.Fatalf("key_hints[local-llm] = %q leaks the raw key", hint)
+	}
+}
+
+// TestSettingsPutProviderKeyNamedProviderRoundTrips is the case Task 3's
+// reviewer flagged as broken: "anthropic" is a plain config.ProviderCfg
+// struct field, not a map entry like the custom-provider case above, so
+// writing its key through SaveConfig's apply(&cfg) only mutated the closure's
+// own cfg copy — a Deps.Cfg value frozen at NewServer construction would
+// never observe that mutation in the same process, leaving key_hints stale.
+// CfgSnapshot (this task's fix) closes that gap: both handleGetSettings's
+// key_hints and handlePutProviderKey's lookup now read through
+// CfgSnapshot(), a mutex-guarded closure over the same live cfg SaveConfig
+// writes — so this now round-trips for a named provider too.
+func TestSettingsPutProviderKeyNamedProviderRoundTrips(t *testing.T) {
+	engine := newSettingsTestEngine(t) // registers anthropic + openai
+	cfg := config.Default()
+	var mu sync.Mutex
+	deps := Deps{
+		Engine: engine,
+		Cfg:    cfg,
+		CfgSnapshot: func() config.Config {
+			mu.Lock()
+			defer mu.Unlock()
+			return cfg
+		},
+		SaveConfig: func(apply func(*config.Config)) error {
+			mu.Lock()
+			defer mu.Unlock()
+			apply(&cfg)
+			return nil
+		},
+	}
+	srv := newSettingsTestServer(t, deps)
+
+	resp := putJSON(t, srv, "/api/providers/anthropic/key", map[string]any{"key": "sk-ant-raw-secret-value"}, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+
+	var body settingsResponse
+	getResp, err := srv.Client().Get(srv.URL + "/api/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer getResp.Body.Close()
+	if err := json.NewDecoder(getResp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	hint := body.KeyHints["anthropic"]
+	if hint == "" {
+		t.Fatal("key_hints[anthropic] is empty, want non-empty masked hint reflecting the just-written key")
+	}
+	if strings.Contains(hint, "sk-ant-raw-secret-value") {
+		t.Fatalf("key_hints[anthropic] = %q leaks the raw key", hint)
 	}
 }
 

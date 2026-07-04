@@ -42,6 +42,16 @@ type Deps struct {
 	// apply live, just don't survive a restart). Settings/mode/key handlers
 	// call it best-effort after applying the change in memory.
 	SaveConfig func(apply func(*config.Config)) error
+
+	// CfgSnapshot returns the current, live config value, synchronized with
+	// whatever guards SaveConfig's writes. Cfg (above) is frozen at
+	// construction time and is fine for the fields no handler ever mutates
+	// (Markets, Timeframe, Storage, MarketData, API); reads that need to
+	// observe a same-process SaveConfig mutation — currently just the
+	// provider-key lookups in settings.go — must go through CfgSnapshot
+	// instead so they don't serve a stale pre-mutation copy. May be nil in
+	// tests that never touch those paths.
+	CfgSnapshot func() config.Config
 }
 
 // serverState is the single cache the background goroutine (runCaches) owns:
