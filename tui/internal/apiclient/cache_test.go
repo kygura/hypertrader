@@ -205,6 +205,131 @@ func TestCacheApplyMarketsUpdatesAndPreserves(t *testing.T) {
 	if pos.Size != 0.5 {
 		t.Errorf("expected ETH Position.Size=0.5, got %f", pos.Size)
 	}
+
+	// Apply markets with SOL (3rd coin), update BTC again, omit ETH entirely
+	solCtx := AssetCtx{
+		Coin:      "SOL",
+		MarkPrice: 140,
+	}
+	solPos := Position{
+		Coin: "SOL",
+		Size: 10.0,
+	}
+	c.ApplyMarkets([]MarketEntry{
+		{
+			Coin: "BTC",
+			Mid:  52000,
+			AssetCtx: AssetCtx{
+				Coin:      "BTC",
+				MarkPrice: 52000,
+			},
+			Position: Position{
+				Coin: "BTC",
+				Size: 3.0,
+			},
+		},
+		{
+			Coin:     "SOL",
+			Mid:      140,
+			AssetCtx: solCtx,
+			Position: solPos,
+		},
+	})
+
+	// Verify BTC was updated again
+	mid = c.Mid("BTC")
+	if mid != 52000 {
+		t.Errorf("expected BTC Mid=52000 after second update, got %f", mid)
+	}
+
+	pos = c.Position("BTC")
+	if pos.Size != 3.0 {
+		t.Errorf("expected BTC Position.Size=3.0 after second update, got %f", pos.Size)
+	}
+
+	// Verify SOL was added
+	mid = c.Mid("SOL")
+	if mid != 140 {
+		t.Errorf("expected SOL Mid=140, got %f", mid)
+	}
+
+	pos = c.Position("SOL")
+	if pos.Size != 10.0 {
+		t.Errorf("expected SOL Position.Size=10.0, got %f", pos.Size)
+	}
+
+	ctx, ok = c.AssetCtx("SOL")
+	if !ok {
+		t.Errorf("expected AssetCtx for SOL to exist")
+	}
+	if ctx.MarkPrice != 140 {
+		t.Errorf("expected SOL AssetCtx.MarkPrice=140, got %f", ctx.MarkPrice)
+	}
+
+	// Apply markets again with only BTC, omitting both ETH and SOL entirely
+	c.ApplyMarkets([]MarketEntry{
+		{
+			Coin: "BTC",
+			Mid:  53000,
+			AssetCtx: AssetCtx{
+				Coin:      "BTC",
+				MarkPrice: 53000,
+			},
+			Position: Position{
+				Coin: "BTC",
+				Size: 4.0,
+			},
+		},
+	})
+
+	// BTC should be updated
+	mid = c.Mid("BTC")
+	if mid != 53000 {
+		t.Errorf("expected BTC Mid=53000 after third update, got %f", mid)
+	}
+
+	pos = c.Position("BTC")
+	if pos.Size != 4.0 {
+		t.Errorf("expected BTC Position.Size=4.0 after third update, got %f", pos.Size)
+	}
+
+	// ETH should still be preserved (unchanged from second ApplyMarkets)
+	mid = c.Mid("ETH")
+	if mid != 3000 {
+		t.Errorf("expected ETH Mid=3000 (preserved), got %f", mid)
+	}
+
+	pos = c.Position("ETH")
+	if pos.Size != 0.5 {
+		t.Errorf("expected ETH Position.Size=0.5 (preserved), got %f", pos.Size)
+	}
+
+	ctx, ok = c.AssetCtx("ETH")
+	if !ok {
+		t.Errorf("expected AssetCtx for ETH to still exist (preserved)")
+	}
+	if ctx.MarkPrice != 3000 {
+		t.Errorf("expected ETH AssetCtx.MarkPrice=3000 (preserved), got %f", ctx.MarkPrice)
+	}
+
+	// SOL should still be preserved (unchanged from third ApplyMarkets)
+	mid = c.Mid("SOL")
+	if mid != 140 {
+		t.Errorf("expected SOL Mid=140 (preserved), got %f", mid)
+	}
+
+	pos = c.Position("SOL")
+	if pos.Size != 10.0 {
+		t.Errorf("expected SOL Position.Size=10.0 (preserved), got %f", pos.Size)
+	}
+
+	ctx, ok = c.AssetCtx("SOL")
+	if !ok {
+		t.Errorf("expected AssetCtx for SOL to still exist (preserved)")
+	}
+	if ctx.MarkPrice != 140 {
+		t.Errorf("expected SOL AssetCtx.MarkPrice=140 (preserved), got %f", ctx.MarkPrice)
+	}
 }
 
 func TestCacheSeedHistoryOverwrites(t *testing.T) {
