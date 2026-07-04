@@ -16,16 +16,17 @@ type marketEntry struct {
 	Bar      metrics.Bar      `json:"bar"`
 	Mid      float64          `json:"mid"`
 	AssetCtx metrics.AssetCtx `json:"asset_ctx"`
+	Position metrics.Position `json:"position"`
 }
 
-// handleMarkets returns one entry per tracked coin that has a bar yet — a
+// handleMarkets returns one entry per visualized coin that has a bar yet — a
 // coin still warming up (no finalized bar for its timeframe) is omitted
 // rather than sent with zero values, so the client doesn't render a false
-// "$0" price. Only when every tracked coin is still empty do we 404: the
+// "$0" price. Only when every visualized coin is still empty do we 404: the
 // dashboard should show a "warming up" state, not an empty success.
 func (s *Server) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	var entries []marketEntry
-	for _, coin := range s.deps.Cfg.Markets.Tracked {
+	for _, coin := range s.deps.Cfg.Markets.Visualized {
 		tf := s.deps.Cfg.Timeframe.For(coin)
 		bar, ok := s.deps.Store.LatestBar(coin, tf)
 		if !ok {
@@ -37,6 +38,7 @@ func (s *Server) handleMarkets(w http.ResponseWriter, r *http.Request) {
 			Bar:      bar,
 			Mid:      s.deps.Store.Mid(coin),
 			AssetCtx: ctx,
+			Position: s.deps.Store.Position(coin),
 		})
 	}
 	if len(entries) == 0 {

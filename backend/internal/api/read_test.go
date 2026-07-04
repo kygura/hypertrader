@@ -93,6 +93,81 @@ func TestMarketsEndpoint(t *testing.T) {
 	if _, ok := byCoin["SOL"]; ok {
 		t.Errorf("SOL should be absent (no bar), got %+v", byCoin)
 	}
+
+	t.Run("serves visualized watchlist instead of tracked; includes position", func(t *testing.T) {
+		// Create a new server with Visualized={BTC,ETH} and Tracked={BTC}
+		s2, st2, _, _ := newTestServer(t, func(c *config.Config) {
+			c.Markets.Visualized = []string{"BTC", "ETH"}
+			c.Markets.Tracked = []string{"BTC"}
+		})
+		srv2 := httptest.NewServer(s2.Handler())
+		defer srv2.Close()
+
+		// Seed bars for both BTC and ETH
+		st2.PutBar(metrics.Bar{Coin: "BTC", Timeframe: "4h", Close: 65000, Final: true, CloseTime: time.Now()})
+		st2.PutBar(metrics.Bar{Coin: "ETH", Timeframe: "1h", Close: 3200, Final: true, CloseTime: time.Now()})
+		st2.PutMids(metrics.MidSnapshot{Mids: map[string]float64{"BTC": 65010, "ETH": 3201}})
+
+		// Seed a position for BTC
+		st2.PutPosition(metrics.Position{Coin: "BTC", Size: 1.5, MarkPrice: 100})
+
+		// Request should return both BTC and ETH from Visualized, not just Tracked
+		var entries2 []struct {
+			Coin     string           `json:"coin"`
+			Bar      metrics.Bar      `json:"bar"`
+			Mid      float64          `json:"mid"`
+			Position metrics.Position `json:"position"`
+		}
+		resp2 := getJSON(t, srv2, "/api/markets", &entries2)
+		if resp2.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp2.StatusCode)
+		}
+		if len(entries2) != 2 {
+			t.Fatalf("len(entries) = %d, want 2 (both BTC and ETH from Visualized)", len(entries2))
+		}
+
+		// Find BTC and ETH entries
+		btcEntry := (*struct {
+			Coin     string           `json:"coin"`
+			Bar      metrics.Bar      `json:"bar"`
+			Mid      float64          `json:"mid"`
+			Position metrics.Position `json:"position"`
+		})(nil)
+		ethEntry := (*struct {
+			Coin     string           `json:"coin"`
+			Bar      metrics.Bar      `json:"bar"`
+			Mid      float64          `json:"mid"`
+			Position metrics.Position `json:"position"`
+		})(nil)
+
+		for i := range entries2 {
+			if entries2[i].Coin == "BTC" {
+				btcEntry = &entries2[i]
+			} else if entries2[i].Coin == "ETH" {
+				ethEntry = &entries2[i]
+			}
+		}
+
+		if btcEntry == nil {
+			t.Fatal("BTC entry not found in response")
+		}
+		if ethEntry == nil {
+			t.Fatal("ETH entry not found in response")
+		}
+
+		// Check BTC position
+		if btcEntry.Position.Size != 1.5 {
+			t.Errorf("BTC position.Size = %v, want 1.5", btcEntry.Position.Size)
+		}
+		if btcEntry.Position.MarkPrice != 100 {
+			t.Errorf("BTC position.MarkPrice = %v, want 100", btcEntry.Position.MarkPrice)
+		}
+
+		// Check ETH (should have zero position)
+		if ethEntry.Position.Size != 0 {
+			t.Errorf("ETH position.Size = %v, want 0 (flat position)", ethEntry.Position.Size)
+		}
+	})
 }
 
 func TestBarsEndpoint(t *testing.T) {
