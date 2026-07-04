@@ -8,7 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/hyperagent/hyperagent/internal/metrics"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // The IDEAS board: the LLM synthesis surface. Every batch verdict lands here as
@@ -19,13 +19,13 @@ import (
 // candidate is one board entry: a verdict plus its arrival time.
 type candidate struct {
 	at time.Time
-	v  metrics.Verdict
+	v  apiclient.Verdict
 }
 
 // upsertCandidate merges a verdict into the board — replacing any existing
 // candidate for the same asset — and re-ranks by confidence descending (ties:
 // newest first). Invalid verdicts never reach the board (validated upstream).
-func (m *Model) upsertCandidate(v metrics.Verdict) {
+func (m *Model) upsertCandidate(v apiclient.Verdict) {
 	c := candidate{at: time.Now(), v: v}
 	replaced := false
 	for i := range m.candidates {
@@ -79,13 +79,13 @@ func (m *Model) moveIdeasSel(d int) {
 
 // actionColor maps a verdict action to its display color: shorts read down,
 // longs up, exits and passivity dim, alerts gold.
-func (t Theme) actionColor(a metrics.Action) color.Color {
+func (t Theme) actionColor(a apiclient.Action) color.Color {
 	switch a {
-	case metrics.ActionOpenShort:
+	case apiclient.ActionOpenShort:
 		return t.Down
-	case metrics.ActionOpenLong:
+	case apiclient.ActionOpenLong:
 		return t.Up
-	case metrics.ActionAlertOnly:
+	case apiclient.ActionAlertOnly:
 		return t.Gold
 	default: // close, scale, hold
 		return t.Dim

@@ -6,13 +6,13 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperagent/hyperagent/internal/metrics"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
-func verdict(asset string, action metrics.Action, conf float64, thesis string) metrics.Verdict {
-	return metrics.Verdict{
+func verdict(asset string, action apiclient.Action, conf float64, thesis string) apiclient.Verdict {
+	return apiclient.Verdict{
 		Asset: asset, Timeframe: "1h", Action: action, Confidence: conf,
-		SizeUSD: 2500, Entry: metrics.Entry{Type: "limit", Price: 41.20},
+		SizeUSD: 2500, Entry: apiclient.Entry{Type: "limit", Price: 41.20},
 		Stop: 43.10, TakeProfit: 37.50, Thesis: thesis,
 	}
 }
@@ -21,9 +21,9 @@ func verdict(asset string, action metrics.Action, conf float64, thesis string) m
 // candidate per asset (latest verdict wins) ranked by confidence descending.
 func TestUpsertCandidateRanksByConfidence(t *testing.T) {
 	m, _ := newTestModel(t)
-	m.upsertCandidate(verdict("ETH", metrics.ActionHold, 0.30, "chop"))
-	m.upsertCandidate(verdict("HYPE", metrics.ActionOpenShort, 0.72, "lower-high into 43"))
-	m.upsertCandidate(verdict("BTC", metrics.ActionOpenLong, 0.55, "reclaim of range mid"))
+	m.upsertCandidate(verdict("ETH", apiclient.ActionHold, 0.30, "chop"))
+	m.upsertCandidate(verdict("HYPE", apiclient.ActionOpenShort, 0.72, "lower-high into 43"))
+	m.upsertCandidate(verdict("BTC", apiclient.ActionOpenLong, 0.55, "reclaim of range mid"))
 
 	got := make([]string, 0, len(m.candidates))
 	for _, c := range m.candidates {
@@ -37,7 +37,7 @@ func TestUpsertCandidateRanksByConfidence(t *testing.T) {
 	}
 
 	// A newer verdict for the same asset replaces, not appends — and re-ranks.
-	m.upsertCandidate(verdict("ETH", metrics.ActionOpenLong, 0.90, "squeeze building"))
+	m.upsertCandidate(verdict("ETH", apiclient.ActionOpenLong, 0.90, "squeeze building"))
 	if len(m.candidates) != 3 {
 		t.Fatalf("dedupe failed: %d candidates, want 3", len(m.candidates))
 	}
@@ -50,8 +50,8 @@ func TestUpsertCandidateRanksByConfidence(t *testing.T) {
 // asset, action, a confidence bar, levels, and the thesis text.
 func TestRenderIdeasShowsRankedRows(t *testing.T) {
 	m, _ := newTestModel(t)
-	m.upsertCandidate(verdict("HYPE", metrics.ActionOpenShort, 0.72, "lower-high into 43; funding flipped"))
-	m.upsertCandidate(verdict("ETH", metrics.ActionHold, 0.30, "chop, no edge"))
+	m.upsertCandidate(verdict("HYPE", apiclient.ActionOpenShort, 0.72, "lower-high into 43; funding flipped"))
+	m.upsertCandidate(verdict("ETH", apiclient.ActionHold, 0.30, "chop, no edge"))
 
 	body := ansi.Strip(m.renderIdeasBody(80))
 	for _, want := range []string{
@@ -75,7 +75,7 @@ func TestRenderIdeasShowsRankedRows(t *testing.T) {
 // markets selection onto the candidate's asset.
 func TestIdeasEnterJumpsToAsset(t *testing.T) {
 	m, _ := newTestModel(t)
-	m.upsertCandidate(verdict("ETH", metrics.ActionOpenLong, 0.80, "squeeze"))
+	m.upsertCandidate(verdict("ETH", apiclient.ActionOpenLong, 0.80, "squeeze"))
 	m.ideasSel = 0
 	m.jumpToCandidate()
 	if got := m.selectedCoin(); got != "ETH" {

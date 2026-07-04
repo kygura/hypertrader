@@ -8,8 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperagent/hyperagent/internal/metrics"
-	"github.com/hyperagent/hyperagent/internal/reasoner"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // TestViewRendersAtEverySize drives the model through a sweep of terminal sizes
@@ -59,16 +58,16 @@ func TestViewRendersAtEverySize(t *testing.T) {
 func TestOverlaysRenderWithinBounds(t *testing.T) {
 	const w, h = 120, 40
 	open := map[string]func(*Model){
-		"settings":      (*Model).openSettings,
-		"settings-keys": (*Model).openAPIKeys,
+		"settings":      func(m *Model) { m.openSettings() },
+		"settings-keys": func(m *Model) { m.openAPIKeys() },
 		"help":          (*Model).openHelp,
-		"provider":      func(m *Model) { m.pushProviderPicker(reasoner.RoleChat) },
-		"model":         func(m *Model) { m.pushModelPicker(reasoner.RoleBatch) },
+		"provider":      func(m *Model) { m.pushProviderPicker(RoleChat) },
+		"model":         func(m *Model) { m.pushModelPicker(RoleBatch) },
 		"mode":          (*Model).pushModePicker,
 		"coin":          (*Model).pushMarketsManager,
 		"coin-action":   func(m *Model) { m.pushCoinActions("BTC") },
 		"coin-tf":       func(m *Model) { m.pushTimeframePicker("BTC") },
-		"stacked":       func(m *Model) { m.openSettings(); m.pushModelPicker(reasoner.RoleChat) },
+		"stacked":       func(m *Model) { m.openSettings(); m.pushModelPicker(RoleChat) },
 	}
 	for name, fn := range open {
 		t.Run(name, func(t *testing.T) {
@@ -156,8 +155,8 @@ func TestEnterShowsDetail(t *testing.T) {
 // only earns a slot at sufficient width.
 func TestMarketsMoveBar(t *testing.T) {
 	m, _ := newTestModel(t)
-	m.store.PutBar(metrics.Bar{Coin: "BTC", Timeframe: "4h", Close: 95000, Return: 0.05})
-	m.store.PutBar(metrics.Bar{Coin: "ETH", Timeframe: "1h", Close: 3500, Return: 0.0})
+	m.cache.PutBar(apiclient.Bar{Coin: "BTC", Timeframe: "4h", Close: 95000, Return: 0.05})
+	m.cache.PutBar(apiclient.Bar{Coin: "ETH", Timeframe: "1h", Close: 3500, Return: 0.0})
 
 	fullBlocks := func(s string) int { return strings.Count(s, "█") }
 
@@ -188,7 +187,7 @@ func TestMarketsMoveBar(t *testing.T) {
 // CVD → liq prox → vol — with the thesis block beneath the stack.
 func TestDetailMetricStack(t *testing.T) {
 	m, _ := newTestModel(t)
-	m.store.PutBar(metrics.Bar{
+	m.cache.PutBar(apiclient.Bar{
 		Coin: "BTC", Timeframe: "4h", Close: 95000, Return: 0.031,
 		OpenInterest: 1.2e6, OIDelta: 0.12, Funding: 0.00011, Basis: 0.0004,
 		CVD: -1.2e6, LiqProx: 0.021, RealizedVol: 0.45,

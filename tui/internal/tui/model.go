@@ -1,7 +1,7 @@
 // The Bubble Tea model: the Elm-style Model/Update/View that is the product. It
 // composes three panes (markets · detail · chat) using lipgloss.JoinHorizontal /
 // JoinVertical, sizes them to the detected terminal, and reads everything from
-// the store (live) plus bus events (push updates). Floating panels (settings,
+// the cache (live) plus bridge events (push updates). Floating panels (settings,
 // pickers, help) live on a single overlay stack — see overlays.go.
 package tui
 
@@ -18,9 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/hyperagent/hyperagent/internal/metrics"
-	"github.com/hyperagent/hyperagent/internal/reasoner"
-	"github.com/hyperagent/hyperagent/internal/store"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // focus identifies which pane has keyboard focus.
@@ -32,9 +30,23 @@ const (
 	focusChat
 )
 
-// ChatFunc runs an interactive completion. The model calls it in a tea.Cmd so the
-// render loop never blocks on the LLM.
-type ChatFunc func(ctx context.Context, userMsg string, history []reasoner.ChatTurn, contextText string) (string, error)
+// Role selects which reasoner role (chat vs batch) a model/provider setting
+// applies to — mirrors backend/internal/reasoner.Role's two values locally,
+// since that package is backend-internal and this module cannot import it.
+type Role string
+
+const (
+	RoleBatch Role = "batch"
+	RoleChat  Role = "chat"
+)
+
+// ChatFunc runs an interactive completion against the daemon's /api/chat
+// endpoint. The model calls it in a tea.Cmd so the render loop never blocks on
+// the LLM. Grounding context is built server-side (reasoner.BuildChatContext,
+// run by the daemon), so unlike the in-process TUI this no longer takes a
+// separate contextText argument — callers fold any extra grounding straight
+// into userMsg when they have it (see generateThesis/thesisContextMsg).
+type ChatFunc func(ctx context.Context, userMsg string, history []apiclient.ChatTurn) (reply string, err error)
 
 // ThesisFn fetches live multi-TF Hyperliquid perp data for coin and returns a
 // compact grounding block for the thesis LLM prompt.
@@ -56,40 +68,21 @@ type liveEntry struct {
 	coin    string
 	kind    string // "fill" | "candidate" | "alert" | "error"
 	summary string
-	verdict *metrics.Verdict
-}
-
-// Controls are the backend hooks the TUI drives. Each is optional; a nil hook
-// means that configuration flow is unavailable (the UI reports so). This keeps
-// the TUI decoupled from the daemon wiring — it issues intents, the hooks apply
-// them to the live ingestor / batcher / reasoner / executor and persist them.
-type Controls struct {
-	Subscribe func(coins ...string)        // ingestor: open feeds for new coins
-	Track     func(coin, timeframe string) // batcher: add to the agent's tracked set
-	Untrack   func(coin string)            // batcher: remove from tracked set
-	ScanNow   func(coins ...string)        // batcher: synthesize tracked markets now
-	SetMode   func(mode string) error      // executor: propose|autonomous (live)
-
-	// Model selection (live).
-	SetProvider    func(role reasoner.Role, name string) error // switch a role's transport
-	SetModel       func(role reasoner.Role, id string) error   // switch a role's model id
-	ActiveModel    func(role reasoner.Role) (provider, model string)
-	ProviderNames  func() []string
-	ProviderModels func() map[string][]string
-
-	// Settings persistence (the settings modal's disk half).
-	SaveSettings func(s Settings) error           // models + mode → config.toml
-	SetAPIKey    func(provider, key string) error // apply live + persist to config.toml
-	KeyHint      func(provider string) string     // masked key state ("sk-…3kF"); "" = unset
+	verdict *apiclient.Verdict
 }
 
 // Model is the root TUI model.
 type Model struct {
 	theme    Theme
-	store    *store.Store
+	cache    *apiclient.Cache
 	chatFn   ChatFunc
-	controls Controls
+	controls *apiclient.Client
 	risk     RiskView
+
+	// settings is the last-fetched full settings snapshot (provider/model
+	// lists, key hints, risk, mode) — seeded from Config.Settings at startup
+	// and refreshed whenever the settings modal opens (see openSettings).
+	settings apiclient.SettingsResponse
 
 	width, height int
 	lay           layout // resolved responsive geometry (recomputed on resize)
@@ -118,19 +111,16 @@ type Model struct {
 	chatTab      int // chatTabAgent, chatTabIdeas, or chatTabLive
 	input        textinput.Model
 	chatVP       viewport.Model
-	liveVP       viewport.Model  // viewport for the Live tab feed
-	liveEntries  []liveEntry     // accumulated live feed entries
-	ideasVP      viewport.Model  // viewport for the Ideas board
-	candidates   []candidate     // ranked trade candidates (one per asset)
-	ideasSel     int             // board cursor (enter jumps to the asset)
-	detailVP       viewport.Model // scrolls detail content when its pane shrinks
-	detailSection  int            // active section cursor (0=signals, 1=thesis, 2=context)
-	chatHeightOffset int          // rows added/removed from base chat height via ctrl+↑↓
-	md             mdState        // glamour renderers + cache for model-output markdown
-	thesisFn       ThesisFn       // fetches live HL multi-TF context for /g
-
-	// Watchlist persistence.
-	watchlistPath string
+	liveVP       viewport.Model // viewport for the Live tab feed
+	liveEntries  []liveEntry    // accumulated live feed entries
+	ideasVP      viewport.Model // viewport for the Ideas board
+	candidates   []candidate    // ranked trade candidates (one per asset)
+	ideasSel     int            // board cursor (enter jumps to the asset)
+	detailVP         viewport.Model // scrolls detail content when its pane shrinks
+	detailSection    int            // active section cursor (0=signals, 1=thesis, 2=context)
+	chatHeightOffset int            // rows added/removed from base chat height via ctrl+↑↓
+	md               mdState        // glamour renderers + cache for model-output markdown
+	thesisFn         ThesisFn       // fetches live HL multi-TF context for /g
 
 	// Chat input history (shell-style up/down recall in the chat pane).
 	inputHistory  []string
@@ -146,7 +136,7 @@ type Model struct {
 }
 
 type chatState struct {
-	turns []reasoner.ChatTurn
+	turns []apiclient.ChatTurn
 	busy  bool
 }
 
@@ -163,18 +153,12 @@ const (
 
 // Config carries everything the model needs at construction.
 type Config struct {
-	Theme         Theme
-	Store         *store.Store
-	Visualized    []string
-	Tracked       []string
-	Timeframes    map[string]string // coin -> default timeframe
-	Mode          string
-	Provider      string
-	Risk          RiskView
-	ChatFn        ChatFunc
-	ThesisFn      ThesisFn
-	Controls      Controls
-	WatchlistPath string // path to persist watchlist mutations; empty = no persistence
+	Theme    Theme
+	Cache    *apiclient.Cache
+	Controls *apiclient.Client
+	Settings apiclient.SettingsResponse // seeds Visualized/Tracked/Timeframes/Mode/Chat.Provider/Risk
+	ChatFn   ChatFunc
+	ThesisFn ThesisFn
 }
 
 // New builds the root model.
@@ -195,13 +179,13 @@ func New(cfg Config) *Model {
 	styles.Blurred.Suggestion = lipgloss.NewStyle().Faint(true)
 	ti.SetStyles(styles)
 
-	tracked := make(map[string]bool, len(cfg.Tracked))
-	for _, c := range cfg.Tracked {
+	tracked := make(map[string]bool, len(cfg.Settings.Tracked))
+	for _, c := range cfg.Settings.Tracked {
 		tracked[c] = true
 	}
-	tf := make(map[string]string, len(cfg.Timeframes))
-	maps.Copy(tf, cfg.Timeframes)
-	for _, c := range cfg.Visualized {
+	tf := make(map[string]string, len(cfg.Settings.Timeframes))
+	maps.Copy(tf, cfg.Settings.Timeframes)
+	for _, c := range cfg.Settings.Visualized {
 		if _, ok := tf[c]; !ok {
 			tf[c] = "1h"
 		}
@@ -214,12 +198,13 @@ func New(cfg Config) *Model {
 
 	m := &Model{
 		theme:         cfg.Theme,
-		store:         cfg.Store,
+		cache:         cfg.Cache,
 		chatFn:        cfg.ChatFn,
 		thesisFn:      cfg.ThesisFn,
 		controls:      cfg.Controls,
-		risk:          cfg.Risk,
-		visualized:    cfg.Visualized,
+		settings:      cfg.Settings,
+		risk:          riskViewFrom(cfg.Settings.Risk),
+		visualized:    cfg.Settings.Visualized,
 		tracked:       tracked,
 		timeframes:    tf,
 		tfCycle:       []string{"15m", "1h", "4h", "1d"},
@@ -233,13 +218,9 @@ func New(cfg Config) *Model {
 		ideasVP:       viewport.New(),
 		detailVP:      viewport.New(),
 		spinner:       sp,
-		mode:          cfg.Mode,
-		provider:      cfg.Provider,
-		watchlistPath: cfg.WatchlistPath,
+		mode:          cfg.Settings.Mode,
+		provider:      cfg.Settings.Chat.Provider,
 		focus:         focusMarkets, // markets-first: selection drives the detail pane
-	}
-	if cfg.WatchlistPath != "" {
-		m.loadWatchlist()
 	}
 	m.seedWelcome()
 	return m
@@ -248,7 +229,7 @@ func New(cfg Config) *Model {
 // seedWelcome posts the first-run orientation into the chat pane — the inline
 // half of the tutorial (? opens the full paged version).
 func (m *Model) seedWelcome() {
-	m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{Role: roleSystem, Text: strings.Join([]string{
+	m.chat.turns = append(m.chat.turns, apiclient.ChatTurn{Role: roleSystem, Text: strings.Join([]string{
 		"welcome to hyperagent — a Hyperliquid marketwatch with an LLM reasoner",
 		"↑↓ pick a market · enter detail · tab move focus",
 		"S scan now — the agent ranks the tracked markets on the IDEAS tab ([ ] to flip)",
@@ -290,20 +271,20 @@ func (m *Model) selectedCoin() string {
 	return fl[m.selected]
 }
 
-// activeModel returns the (provider, model) bound to a role for display, falling
-// back to the seed provider when the control isn't wired (e.g. tests).
-func (m *Model) activeModel(role reasoner.Role) (provider, model string) {
-	if m.controls.ActiveModel != nil {
-		return m.controls.ActiveModel(role)
-	}
-	if role == reasoner.RoleChat {
-		return m.provider, ""
+// activeModel returns the (provider, model) bound to a role for display, read
+// from the last-fetched settings snapshot.
+func (m *Model) activeModel(role Role) (provider, model string) {
+	switch role {
+	case RoleChat:
+		return m.settings.Chat.Provider, m.settings.Chat.Model
+	case RoleBatch:
+		return m.settings.Batch.Provider, m.settings.Batch.Model
 	}
 	return "", ""
 }
 
 // chatModelDisplay returns the chat role's provider and model for the status line,
-// keeping view.go free of a direct reasoner dependency.
+// keeping view.go free of a direct settings-role dependency.
 func (m *Model) chatModelDisplay() (provider, model string) {
-	return m.activeModel(reasoner.RoleChat)
+	return m.activeModel(RoleChat)
 }

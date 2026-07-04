@@ -11,7 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
 
-	"github.com/hyperagent/hyperagent/internal/metrics"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // The marketwatch: every visualized asset in one scannable, sortable grid, rendered
@@ -84,12 +84,12 @@ func (m *Model) ordered() []string {
 
 // sortMetric returns the value the active sort key ranks a coin by.
 func (m *Model) sortMetric(coin string) float64 {
-	bar, _ := m.store.LatestBar(coin, m.timeframes[coin])
+	bar, _ := m.cache.LatestBar(coin, m.timeframes[coin])
 	switch m.sortKey {
 	case sortChange:
 		return bar.Return
 	case sortFunding:
-		if ctx, ok := m.store.AssetCtx(coin); ok {
+		if ctx, ok := m.cache.AssetCtx(coin); ok {
 			return ctx.Funding
 		}
 		return bar.Funding
@@ -125,9 +125,9 @@ type marketRowData struct {
 
 func (m *Model) marketRow(coin string) marketRowData {
 	tf := m.timeframes[coin]
-	bar, _ := m.store.LatestBar(coin, tf)
-	ctx, _ := m.store.AssetCtx(coin)
-	price := m.store.Mid(coin)
+	bar, _ := m.cache.LatestBar(coin, tf)
+	ctx, _ := m.cache.AssetCtx(coin)
+	price := m.cache.Mid(coin)
 	if price == 0 {
 		price = bar.Close
 	}
@@ -139,7 +139,7 @@ func (m *Model) marketRow(coin string) marketRowData {
 		funding = bar.Funding
 	}
 	sigText, sigColor := m.confluenceCell(coin)
-	hist := m.store.History(coin, tf, 7)
+	hist := m.cache.History(coin, tf, 7)
 	return marketRowData{
 		coin:     coin,
 		idx:      m.assetIndex(coin),
@@ -148,11 +148,11 @@ func (m *Model) marketRow(coin string) marketRowData {
 		funding:  funding,
 		oiDelta:  bar.OIDelta,
 		rel:      bar.RelStrength,
-		spark:    seriesOf(hist, func(b metrics.Bar) float64 { return b.Close }),
+		spark:    seriesOf(hist, func(b apiclient.Bar) float64 { return b.Close }),
 		sigText:  sigText,
 		sigColor: sigColor,
 		tracked:  m.tracked[coin],
-		hasPos:   !m.store.Position(coin).IsFlat(),
+		hasPos:   !m.cache.Position(coin).IsFlat(),
 	}
 }
 

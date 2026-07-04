@@ -7,8 +7,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/hyperagent/hyperagent/internal/metrics"
-	"github.com/hyperagent/hyperagent/internal/signal"
+	"github.com/hyperagent/tui/internal/apiclient"
+	"github.com/hyperagent/tui/internal/signal"
 )
 
 // Detail-pane section constants, in render order. The cursor (m.detailSection)
@@ -42,10 +42,10 @@ func (m *Model) renderDetail(width int) string {
 		return m.theme.Label.Render("no asset selected")
 	}
 	tf := m.timeframes[coin]
-	bar, hasBar := m.store.LatestBar(coin, tf)
-	ctx, _ := m.store.AssetCtx(coin)
-	mid := m.store.Mid(coin)
-	history := m.store.History(coin, tf, 48)
+	bar, hasBar := m.cache.LatestBar(coin, tf)
+	ctx, _ := m.cache.AssetCtx(coin)
+	mid := m.cache.Mid(coin)
+	history := m.cache.History(coin, tf, 48)
 
 	var s []string
 	add := func(lines ...string) { s = append(s, lines...) }
@@ -82,15 +82,15 @@ func (m *Model) renderDetail(width int) string {
 	// --- The §4.1 metric stack. History-shaped series (OI, funding) get block
 	// columns — the shape over time is the signal; scalars get bar rows. ---
 	add("", m.sectionTitle("metrics", detailSectionContext)+m.theme.Label.Render("  "+tf+" · last "+fmt.Sprint(len(history))+" bars"))
-	oiSeries := seriesOf(history, func(b metrics.Bar) float64 { return b.OpenInterest })
-	fundSeries := seriesOf(history, func(b metrics.Bar) float64 { return b.Funding })
+	oiSeries := seriesOf(history, func(b apiclient.Bar) float64 { return b.OpenInterest })
+	fundSeries := seriesOf(history, func(b apiclient.Bar) float64 { return b.Funding })
 	add(m.seriesRow("OI Δ", m.theme.blockColumn(oiSeries), bar.OIDelta*100, "%+.2f%%"))
 	add(m.seriesRow("funding", m.theme.blockColumn(fundSeries), ctx.Funding*100, "%+.4f%%"))
 	barW := max(6, width-26)
-	add(m.theme.barRow("basis", bar.Basis*100, -absBound(history, func(b metrics.Bar) float64 { return b.Basis * 100 }), absBound(history, func(b metrics.Bar) float64 { return b.Basis * 100 }), barW, "%+.4f%%", true))
+	add(m.theme.barRow("basis", bar.Basis*100, -absBound(history, func(b apiclient.Bar) float64 { return b.Basis * 100 }), absBound(history, func(b apiclient.Bar) float64 { return b.Basis * 100 }), barW, "%+.4f%%", true))
 	add(m.theme.divergingBar("CVD", bar.CVD, cvdBound(history), max(4, barW/2), "%+.0f"))
 	add(m.theme.barRow("liq prox", bar.LiqProx*100, 0, 100, barW, "%.1f%%", false))
-	add(m.theme.barRow("vol", bar.RealizedVol*100, 0, absBound(history, func(b metrics.Bar) float64 { return b.RealizedVol * 100 }), barW, "%.2f%%", false))
+	add(m.theme.barRow("vol", bar.RealizedVol*100, 0, absBound(history, func(b apiclient.Bar) float64 { return b.RealizedVol * 100 }), barW, "%.2f%%", false))
 	if bar.BuyVolume > 0 || bar.SellVolume > 0 {
 		add(m.theme.stackedBar("flow", bar.BuyVolume, bar.SellVolume, barW, "%+.2f"))
 	}
@@ -128,7 +128,7 @@ func (m *Model) renderDetail(width int) string {
 	}
 
 	// --- Open position, if any. ---
-	if pos := m.store.Position(coin); !pos.IsFlat() {
+	if pos := m.cache.Position(coin); !pos.IsFlat() {
 		dir := "LONG"
 		if pos.IsShort() {
 			dir = "SHORT"
@@ -142,7 +142,7 @@ func (m *Model) renderDetail(width int) string {
 
 // absBound returns the max |value| of a series accessor over history, with a
 // floor of 1e-9 so bar scaling never divides by zero.
-func absBound(bars []metrics.Bar, f func(metrics.Bar) float64) float64 {
+func absBound(bars []apiclient.Bar, f func(apiclient.Bar) float64) float64 {
 	bound := 1e-9
 	for _, b := range bars {
 		bound = math.Max(bound, math.Abs(f(b)))
@@ -173,7 +173,7 @@ func (m *Model) seriesRow(label, series string, value float64, fmtVal string) st
 }
 
 // seriesOf extracts a float series from bars via an accessor.
-func seriesOf(bars []metrics.Bar, f func(metrics.Bar) float64) []float64 {
+func seriesOf(bars []apiclient.Bar, f func(apiclient.Bar) float64) []float64 {
 	out := make([]float64, 0, len(bars))
 	for _, b := range bars {
 		out = append(out, f(b))
@@ -182,7 +182,7 @@ func seriesOf(bars []metrics.Bar, f func(metrics.Bar) float64) []float64 {
 }
 
 // cvdBound returns a symmetric bound for the diverging CVD bar from history.
-func cvdBound(bars []metrics.Bar) float64 {
+func cvdBound(bars []apiclient.Bar) float64 {
 	max := 1.0
 	for _, b := range bars {
 		if absf(b.CVD) > max {

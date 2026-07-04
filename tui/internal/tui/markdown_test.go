@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/hyperagent/hyperagent/internal/reasoner"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // TestRenderMarkdown verifies glamour output: markdown syntax is consumed (no
@@ -88,7 +88,7 @@ func TestThesisFeedRendersMarkdownBody(t *testing.T) {
 	mdl, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mdl.(*Model)
 
-	m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{
+	m.chat.turns = append(m.chat.turns, apiclient.ChatTurn{
 		Role: roleThesis,
 		Text: "12:00 · BTC 1h · LONG\nfunding is *negative* while OI climbs",
 	})

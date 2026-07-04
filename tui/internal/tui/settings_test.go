@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperagent/hyperagent/internal/reasoner"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 func keyPress(s string) tea.KeyPressMsg {
@@ -60,12 +60,10 @@ func TestSettingsOpensAndTabs(t *testing.T) {
 }
 
 // TestSettingsAPIKeyFlow drives the API Keys tab end-to-end: enter starts the
-// masked editor, typing + enter calls SetAPIKey with the provider and the key.
+// masked editor, typing + enter calls SetProviderKey with the provider and the
+// key via the daemon's PUT /api/providers/{name}/key endpoint.
 func TestSettingsAPIKeyFlow(t *testing.T) {
-	m, _ := newTestModel(t)
-	var gotProv, gotKey string
-	m.controls.SetAPIKey = func(p, k string) error { gotProv, gotKey = p, k; return nil }
-	m.controls.KeyHint = func(p string) string { return "" }
+	m, rec := newTestModel(t)
 	mdl, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mdl.(*Model)
 
@@ -80,58 +78,41 @@ func TestSettingsAPIKeyFlow(t *testing.T) {
 	}
 	drive(m, "s", "k", "-", "1") // type a key
 	drive(m, "enter")            // submit
-	if gotProv != "anthropic" || gotKey != "sk-1" {
-		t.Fatalf("SetAPIKey got (%q,%q), want (anthropic, sk-1)", gotProv, gotKey)
+	if rec.keyProvider != "anthropic" || rec.keyValue != "sk-1" {
+		t.Fatalf("SetProviderKey got (%q,%q), want (anthropic, sk-1)", rec.keyProvider, rec.keyValue)
 	}
 	if !strings.Contains(so.status, "✓") {
 		t.Fatalf("status should confirm, got %q", so.status)
 	}
 }
 
-// TestSettingsModelPickerPersists: choosing a model in the picker applies it via
-// SetProvider/SetModel and snapshots everything through SaveSettings.
+// TestSettingsModelPickerPersists: choosing a model in the picker applies it
+// live and persists it through the daemon's PUT /api/settings endpoint.
 func TestSettingsModelPickerPersists(t *testing.T) {
-	m, _ := newTestModel(t)
-	var saved *Settings
-	active := map[reasoner.Role][2]string{
-		reasoner.RoleChat:  {"anthropic", "claude-opus-4-8"},
-		reasoner.RoleBatch: {"deepseek", "deepseek-chat"},
-	}
-	m.controls.SetModel = func(r reasoner.Role, id string) error {
-		a := active[r]
-		active[r] = [2]string{a[0], id}
-		return nil
-	}
-	m.controls.SetProvider = func(r reasoner.Role, n string) error {
-		active[r] = [2]string{n, ""}
-		return nil
-	}
-	m.controls.ActiveModel = func(r reasoner.Role) (string, string) { return active[r][0], active[r][1] }
-	m.controls.ProviderModels = func() map[string][]string {
-		return map[string][]string{"anthropic": {"claude-opus-4-8", "claude-sonnet-4-6"}}
-	}
-	m.controls.SaveSettings = func(s Settings) error { saved = &s; return nil }
+	m, rec := newTestModel(t)
+	m.settings.ProviderModels = map[string][]string{"anthropic": {"claude-opus-4-8", "claude-sonnet-4-6"}}
+	m.settings.Chat = apiclient.RoleSettings{Provider: "anthropic", Model: "claude-opus-4-8"}
 	mdl, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mdl.(*Model)
 
-	m.pushModelPicker(reasoner.RoleChat)
+	m.pushModelPicker(RoleChat)
 	drive(m, "down", "enter") // pick the second model
-	if saved == nil {
+	if len(rec.saves) == 0 {
 		t.Fatal("model selection must persist via SaveSettings")
 	}
-	if saved.ChatModel != "claude-sonnet-4-6" {
-		t.Fatalf("persisted chat model %q, want claude-sonnet-4-6", saved.ChatModel)
+	last := rec.saves[len(rec.saves)-1]
+	if last.ChatModel != "claude-sonnet-4-6" {
+		t.Fatalf("persisted chat model %q, want claude-sonnet-4-6", last.ChatModel)
 	}
 	if m.hasOverlay() {
 		t.Fatal("picker should close after selection")
 	}
 }
 
-// TestModePickerPersists: mode change applies live (SetMode) and persists.
+// TestModePickerPersists: mode change applies live via the daemon's
+// PUT /api/execution/mode endpoint.
 func TestModePickerPersists(t *testing.T) {
 	m, rec := newTestModel(t)
-	var saved *Settings
-	m.controls.SaveSettings = func(s Settings) error { saved = &s; return nil }
 	mdl, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = mdl.(*Model)
 
@@ -139,9 +120,6 @@ func TestModePickerPersists(t *testing.T) {
 	drive(m, "down", "enter") // propose -> autonomous
 	if rec.mode != "autonomous" || m.mode != "autonomous" {
 		t.Fatalf("mode not applied live: rec=%q m=%q", rec.mode, m.mode)
-	}
-	if saved == nil || saved.Mode != "autonomous" {
-		t.Fatalf("mode not persisted: %+v", saved)
 	}
 }
 

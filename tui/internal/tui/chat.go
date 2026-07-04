@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"github.com/hyperagent/hyperagent/internal/metrics"
+
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // chatCommandList is the suggestion set for native ghost-text autocomplete.
@@ -191,7 +192,7 @@ func indent(s, pad string) string {
 // liveEntryFrom converts a journalMsg into a liveEntry. Returns ok=false when
 // the kind should not appear in the live feed (alerts and errors are included;
 // plain status notes are not).
-func liveEntryFrom(coin, kind, summary string, verdict *metrics.Verdict) (liveEntry, bool) {
+func liveEntryFrom(coin, kind, summary string, verdict *apiclient.Verdict) (liveEntry, bool) {
 	switch kind {
 	case "fill", "candidate", "alert", "error":
 		e := liveEntry{

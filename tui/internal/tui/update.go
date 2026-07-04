@@ -9,8 +9,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/hyperagent/hyperagent/internal/bus"
-	"github.com/hyperagent/hyperagent/internal/reasoner"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // Update implements tea.Model. It handles window sizing, navigation keys, chat
@@ -46,7 +45,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case verdictMsg:
-		v := reasoner.Verdict(msg)
+		v := apiclient.Verdict(msg)
 		if v.Thesis != "" {
 			m.thesis[v.Asset] = v.Thesis
 		}
@@ -70,8 +69,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case thesisContextMsg:
 		contextText := msg.context
 		if msg.err != nil {
-			// Fallback to live store context — never a blank thesis.
-			contextText = m.chatContext()
+			// No local fallback grounding in the standalone TUI — there is no
+			// in-process store to read from anymore, so a failed ThesisFn
+			// call just proceeds without the extra HL data block rather than
+			// blocking the thesis prompt entirely.
+			contextText = ""
 		}
 		prompt := fmt.Sprintf(
 			"Generate a concise trading thesis for %s on the %s timeframe. "+
@@ -86,7 +88,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (batch reasoner errors, aggregator warnings) carry the erroring provider
 		// in Detail ("deepseek: api error: …") so the attribution is visible in the
 		// status line without clobbering the chat-provider display.
-		if msg.Kind == bus.StatusConn {
+		if msg.Kind == statusConn {
 			m.connected = msg.Connected
 			if msg.Provider != "" {
 				m.provider = msg.Provider
@@ -106,8 +108,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			text = "error: " + msg.err.Error()
 		}
-		m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{Role: "assistant", Text: text})
+		m.chat.turns = append(m.chat.turns, apiclient.ChatTurn{Role: "assistant", Text: text})
 		m.refreshChat()
+		return m, nil
+
+	case fetchSettingsMsg:
+		// A failed refresh keeps the last-known-good snapshot rather than
+		// blanking provider/model lists out from under an open settings modal.
+		if msg.err == nil {
+			m.settings = msg.settings
+		}
 		return m, nil
 
 	case statusClearMsg:
@@ -419,7 +429,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.openSettings()
 	case "m":
-		m.pushModelPicker(reasoner.RoleChat)
+		m.pushModelPicker(RoleChat)
 	case "g":
 		return m, m.generateThesis()
 	case "ctrl+p":
@@ -586,10 +596,10 @@ func (m *Model) sendChat() tea.Cmd {
 	m.historyCursor = -1
 
 	if isCommand(text) {
-		m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{Role: "user", Text: text})
+		m.chat.turns = append(m.chat.turns, apiclient.ChatTurn{Role: "user", Text: text})
 		reply, cmd := m.runCommand(text)
 		if reply != "" {
-			m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{Role: "system", Text: reply})
+			m.chat.turns = append(m.chat.turns, apiclient.ChatTurn{Role: "system", Text: reply})
 		}
 		m.refreshChat()
 		m.chatVP.GotoBottom()
@@ -601,72 +611,49 @@ func (m *Model) sendChat() tea.Cmd {
 
 // submitChat appends a user turn, marks the chat busy, and kicks off the LLM
 // call alongside the thinking spinner. Shared by free-text chat and the
-// "generate thesis" action.
+// "generate thesis" action (with no extra grounding — see submitChatWithCtx).
 func (m *Model) submitChat(text string) tea.Cmd {
+	return m.submitChatWithCtx(text, "")
+}
+
+// submitChatWithCtx is like submitChat but folds contextText (extra grounding
+// the caller already fetched — e.g. generateThesis's HL multi-TF data) into
+// the message sent to the LLM. contextText never appears in the visible
+// transcript: the user turn shown in the pane is always the clean prompt.
+// Regular chat grounding is otherwise built server-side by the daemon's
+// /api/chat handler, which is why ChatFunc itself takes no context argument.
+func (m *Model) submitChatWithCtx(text, contextText string) tea.Cmd {
 	if text == "" || m.chat.busy {
 		return nil
 	}
-	m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{Role: "user", Text: text})
+	m.chat.turns = append(m.chat.turns, apiclient.ChatTurn{Role: "user", Text: text})
 	m.chat.busy = true
 	m.refreshChat()
 	m.chatVP.GotoBottom()
 
 	history := chatHistoryForLLM(m.chat.turns)
-	contextText := m.chatContext()
+	userMsg := text
+	if contextText != "" {
+		userMsg = contextText + "\n\n" + text
+	}
 	fn := m.chatFn
 	ask := func() tea.Msg {
 		if fn == nil {
 			return chatReplyMsg{err: fmt.Errorf("chat not configured")}
 		}
-		reply, err := fn(context.Background(), text, history, contextText)
+		reply, err := fn(context.Background(), userMsg, history)
 		return chatReplyMsg{text: reply, err: err}
 	}
 	// Run the LLM call and start the thinking spinner together.
 	return tea.Batch(ask, m.spinner.Tick)
 }
 
-// submitChatWithCtx is like submitChat but uses an explicit contextText instead
-// of calling chatContext() — used by the thesis path which fetches richer data.
-func (m *Model) submitChatWithCtx(text, contextText string) tea.Cmd {
-	if text == "" || m.chat.busy {
-		return nil
-	}
-	m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{Role: "user", Text: text})
-	m.chat.busy = true
-	m.refreshChat()
-	m.chatVP.GotoBottom()
-
-	history := chatHistoryForLLM(m.chat.turns)
-	fn := m.chatFn
-	ask := func() tea.Msg {
-		if fn == nil {
-			return chatReplyMsg{err: fmt.Errorf("chat not configured")}
-		}
-		reply, err := fn(context.Background(), text, history, contextText)
-		return chatReplyMsg{text: reply, err: err}
-	}
-	return tea.Batch(ask, m.spinner.Tick)
-}
-
-// chatContext assembles the grounding text handed to the chat LLM: a snapshot of
-// the selected asset's live metrics plus the interpreted signals, so the agent
-// answers from the same normalized read the panel shows — not raw numbers alone.
-// The actual computation lives in reasoner.BuildChatContext so the HTTP API's
-// /api/chat endpoint can share it rather than duplicating this logic.
-func (m *Model) chatContext() string {
-	coin := m.selectedCoin()
-	if coin == "" {
-		return ""
-	}
-	return reasoner.BuildChatContext(m.store, coin, m.timeframes[coin])
-}
-
 // postThesis adds an actionable batch verdict to the conversation as a proactive
 // agent turn — the "agent speaks up" feed. Holds stay quiet (they're reflected in the
 // panel), and a thesis is only posted once per asset until it changes, so a steady
 // regime doesn't spam the transcript every batch cycle.
-func (m *Model) postThesis(v reasoner.Verdict) {
-	if v.Action == reasoner.ActionHold || v.Thesis == "" {
+func (m *Model) postThesis(v apiclient.Verdict) {
+	if v.Action == apiclient.ActionHold || v.Thesis == "" {
 		return
 	}
 	if m.postedThesis[v.Asset] == v.Thesis {
@@ -678,7 +665,7 @@ func (m *Model) postThesis(v reasoner.Verdict) {
 	if v.Confidence > 0 {
 		headline += fmt.Sprintf(" · %.0f%%", v.Confidence*100)
 	}
-	m.chat.turns = append(m.chat.turns, reasoner.ChatTurn{Role: roleThesis, Text: headline + "\n" + v.Thesis})
+	m.chat.turns = append(m.chat.turns, apiclient.ChatTurn{Role: roleThesis, Text: headline + "\n" + v.Thesis})
 	m.refreshChat()
 }
 
@@ -793,14 +780,14 @@ func (m *Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 // see: user and assistant turns only. Command echoes (system) are dropped, and
 // proactive theses are relayed as assistant turns so the agent recalls them — this
 // also prevents non-standard roles from reaching the provider APIs.
-func chatHistoryForLLM(turns []reasoner.ChatTurn) []reasoner.ChatTurn {
-	out := make([]reasoner.ChatTurn, 0, len(turns))
+func chatHistoryForLLM(turns []apiclient.ChatTurn) []apiclient.ChatTurn {
+	out := make([]apiclient.ChatTurn, 0, len(turns))
 	for _, t := range turns {
 		switch t.Role {
 		case roleUser:
 			out = append(out, t)
 		case roleAgent, roleThesis:
-			out = append(out, reasoner.ChatTurn{Role: roleAgent, Text: t.Text})
+			out = append(out, apiclient.ChatTurn{Role: roleAgent, Text: t.Text})
 		}
 	}
 	return out

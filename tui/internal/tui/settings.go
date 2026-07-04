@@ -1,11 +1,13 @@
 // The settings modal: a tabbed configuration hub (Models · API Keys · Trading ·
-// Markets) opened with s. Every change applies to the live daemon through
-// Controls and persists to config.toml through Controls.SaveSettings /
-// SetAPIKey, so a model switch or a pasted API key survives a restart. API keys
-// are entered through a masked textinput and never echoed back in full.
+// Markets) opened with s. Every change applies to the live daemon and persists
+// to config.toml through the daemon's control-plane API (SaveSettings /
+// SetProviderKey / SetMode), so a model switch or a pasted API key survives a
+// restart. API keys are entered through a masked textinput and never echoed
+// back in full.
 package tui
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,17 +16,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/hyperagent/hyperagent/internal/reasoner"
+	"github.com/hyperagent/tui/internal/apiclient"
 )
-
-// Settings is the persisted snapshot handed to Controls.SaveSettings: the
-// per-role model bindings plus the execution mode. The daemon maps it onto
-// config.toml; the TUI never touches the file directly.
-type Settings struct {
-	ChatProvider, ChatModel   string
-	BatchProvider, BatchModel string
-	Mode                      string
-}
 
 // RiskView is the read-only execution-risk display for the Trading tab.
 type RiskView struct {
@@ -32,6 +25,17 @@ type RiskView struct {
 	MaxTotalExposureUSD float64
 	MaxConcurrent       int
 	DailyLossKillUSD    float64
+}
+
+// riskViewFrom converts the wire risk settings into the Trading tab's display
+// struct.
+func riskViewFrom(r apiclient.RiskSettings) RiskView {
+	return RiskView{
+		MaxPositionUSD:      r.MaxPositionUSD,
+		MaxTotalExposureUSD: r.MaxTotalExposureUSD,
+		MaxConcurrent:       r.MaxConcurrent,
+		DailyLossKillUSD:    r.DailyLossKillUSD,
+	}
 }
 
 type settingsTab int
@@ -85,29 +89,39 @@ func newSettingsOverlay(tab settingsTab) *settingsOverlay {
 	return &settingsOverlay{tab: tab}
 }
 
-// openSettings pushes the settings hub (s key, /settings).
-func (m *Model) openSettings() { m.push(newSettingsOverlay(tabModels)) }
+// openSettings pushes the settings hub (s key, /settings) and kicks off a
+// refresh of the cached settings snapshot so the modal shows live daemon
+// state rather than whatever was seeded at startup.
+func (m *Model) openSettings() tea.Cmd {
+	m.push(newSettingsOverlay(tabModels))
+	return m.fetchSettings()
+}
 
 // openAPIKeys jumps straight to the API Keys tab (/keys).
-func (m *Model) openAPIKeys() { m.push(newSettingsOverlay(tabKeys)) }
+func (m *Model) openAPIKeys() tea.Cmd {
+	m.push(newSettingsOverlay(tabKeys))
+	return m.fetchSettings()
+}
 
-// --- persistence -----------------------------------------------------------
+// fetchSettingsMsg carries the result of an async GET /api/settings refresh
+// kicked off by fetchSettings; the Update loop applies settings onto m.settings
+// on success and leaves the previous snapshot in place on error.
+type fetchSettingsMsg struct {
+	settings apiclient.SettingsResponse
+	err      error
+}
 
-// saveSettings snapshots the live model/mode selections through SaveSettings so
-// they land in config.toml. Errors surface on the status line, never crash.
-func (m *Model) saveSettings() {
-	if m.controls.SaveSettings == nil {
-		return
+// fetchSettings asynchronously re-fetches GET /api/settings, landing as a
+// fetchSettingsMsg the Update loop applies to m.settings. Returns nil when
+// Controls isn't wired (e.g. some tests).
+func (m *Model) fetchSettings() tea.Cmd {
+	client := m.controls
+	if client == nil {
+		return nil
 	}
-	chatProv, chatModel := m.activeModel(reasoner.RoleChat)
-	batchProv, batchModel := m.activeModel(reasoner.RoleBatch)
-	err := m.controls.SaveSettings(Settings{
-		ChatProvider: chatProv, ChatModel: chatModel,
-		BatchProvider: batchProv, BatchModel: batchModel,
-		Mode: m.mode,
-	})
-	if err != nil {
-		m.statusMsg = "save: " + err.Error()
+	return func() tea.Msg {
+		s, err := client.Settings(context.Background())
+		return fetchSettingsMsg{settings: s, err: err}
 	}
 }
 
@@ -127,9 +141,9 @@ func (so *settingsOverlay) rows(m *Model) []settingsRow {
 }
 
 func (so *settingsOverlay) modelRows(m *Model) []settingsRow {
-	chatProv, chatModel := m.activeModel(reasoner.RoleChat)
-	batchProv, batchModel := m.activeModel(reasoner.RoleBatch)
-	pick := func(role reasoner.Role) func(*Model, *settingsOverlay) tea.Cmd {
+	chatProv, chatModel := m.activeModel(RoleChat)
+	batchProv, batchModel := m.activeModel(RoleBatch)
+	pick := func(role Role) func(*Model, *settingsOverlay) tea.Cmd {
 		return func(m *Model, so *settingsOverlay) tea.Cmd {
 			m.pushModelPicker(role)
 			return nil
@@ -139,24 +153,18 @@ func (so *settingsOverlay) modelRows(m *Model) []settingsRow {
 	// provider, so there is no need to choose providers separately.
 	return []settingsRow{
 		{label: "Chat model", value: orDash(joinPM(chatProv, chatModel)),
-			note: "answers the chat pane and escalations", act: pick(reasoner.RoleChat)},
+			note: "answers the chat pane and escalations", act: pick(RoleChat)},
 		{label: "Batch model", value: orDash(joinPM(batchProv, batchModel)),
-			note: "reads every digest batch — cheap model recommended", act: pick(reasoner.RoleBatch)},
+			note: "reads every digest batch — cheap model recommended", act: pick(RoleBatch)},
 	}
 }
 
 func (so *settingsOverlay) keyRows(m *Model) []settingsRow {
-	var names []string
-	if m.controls.ProviderNames != nil {
-		names = m.controls.ProviderNames()
-	}
+	names := append([]string(nil), m.settings.ProviderNames...)
 	sort.Strings(names)
 	rows := make([]settingsRow, 0, len(names))
 	for _, name := range names {
-		hint := ""
-		if m.controls.KeyHint != nil {
-			hint = m.controls.KeyHint(name)
-		}
+		hint := m.settings.KeyHints[name]
 		value, note := "○ not set", "enter to paste a key — stored in config.toml"
 		if hint != "" {
 			value, note = "● "+hint, "enter to replace"
@@ -170,13 +178,16 @@ func (so *settingsOverlay) keyRows(m *Model) []settingsRow {
 						so.status = "✗ empty key — nothing saved"
 						return nil
 					}
-					if m.controls.SetAPIKey == nil {
+					if m.controls == nil {
 						so.status = "✗ key configuration unavailable"
 						return nil
 					}
-					if err := m.controls.SetAPIKey(prov, v); err != nil {
+					if err := m.controls.SetProviderKey(context.Background(), prov, v); err != nil {
 						so.status = "✗ " + err.Error()
 						return nil
+					}
+					if s, err := m.controls.Settings(context.Background()); err == nil {
+						m.settings = s
 					}
 					so.status = "✓ " + prov + " key saved · applied live"
 					return nil
@@ -404,18 +415,29 @@ func (so *settingsOverlay) view(m *Model, maxW, maxH int) string {
 
 // --- nested pickers ----------------------------------------------------------
 
+// settingsArgsFor maps a role + provider/model pick onto the four positional
+// SaveSettings arguments (chat_provider, chat_model, batch_provider,
+// batch_model) — the other role's pair is left blank, which the daemon's PUT
+// /api/settings treats as "leave unchanged" (see backend/internal/api/settings.go).
+func settingsArgsFor(role Role, provider, model string) (chatP, chatM, batchP, batchM string) {
+	switch role {
+	case RoleChat:
+		return provider, model, "", ""
+	case RoleBatch:
+		return "", "", provider, model
+	}
+	return "", "", "", ""
+}
+
 // pushProviderPicker lists registered providers for a role; selection applies
 // live and persists.
-func (m *Model) pushProviderPicker(role reasoner.Role) {
+func (m *Model) pushProviderPicker(role Role) {
 	cur, _ := m.activeModel(role)
-	var names []string
-	if m.controls.ProviderNames != nil {
-		names = m.controls.ProviderNames()
-	}
+	names := m.settings.ProviderNames
 	items := make([]listItem, 0, len(names))
 	for _, n := range names {
 		hint := ""
-		if m.controls.KeyHint != nil && m.controls.KeyHint(n) == "" {
+		if m.settings.KeyHints[n] == "" {
 			hint = "no key"
 		}
 		items = append(items, listItem{key: n, label: n, hint: hint, on: n == cur})
@@ -424,15 +446,19 @@ func (m *Model) pushProviderPicker(role reasoner.Role) {
 		title: "PROVIDER · " + string(role),
 		items: items,
 		onSelect: func(m *Model, it listItem) tea.Cmd {
-			if m.controls.SetProvider != nil {
-				if err := m.controls.SetProvider(role, it.key); err != nil {
+			if m.controls != nil {
+				chatP, _, batchP, _ := settingsArgsFor(role, it.key, "")
+				if err := m.controls.SaveSettings(context.Background(), chatP, "", batchP, ""); err != nil {
 					return m.note(err.Error())
 				}
 			}
-			if role == reasoner.RoleChat {
+			switch role {
+			case RoleChat:
+				m.settings.Chat.Provider = it.key
 				m.provider = it.key
+			case RoleBatch:
+				m.settings.Batch.Provider = it.key
 			}
-			m.saveSettings()
 			m.pop()
 			return m.note(string(role) + " provider → " + it.key)
 		},
@@ -441,20 +467,18 @@ func (m *Model) pushProviderPicker(role reasoner.Role) {
 
 // pushModelPicker lists every known model grouped by provider; picking a model
 // under a different provider re-points the transport too.
-func (m *Model) pushModelPicker(role reasoner.Role) {
+func (m *Model) pushModelPicker(role Role) {
 	_, cur := m.activeModel(role)
 	var items []listItem
-	if m.controls.ProviderModels != nil {
-		pm := m.controls.ProviderModels()
-		provs := make([]string, 0, len(pm))
-		for p := range pm {
-			provs = append(provs, p)
-		}
-		sort.Strings(provs)
-		for _, p := range provs {
-			for _, id := range pm[p] {
-				items = append(items, listItem{key: p + "\x00" + id, label: id, hint: p, on: id == cur})
-			}
+	pm := m.settings.ProviderModels
+	provs := make([]string, 0, len(pm))
+	for p := range pm {
+		provs = append(provs, p)
+	}
+	sort.Strings(provs)
+	for _, p := range provs {
+		for _, id := range pm[p] {
+			items = append(items, listItem{key: p + "\x00" + id, label: id, hint: p, on: id == cur})
 		}
 	}
 	m.push(&listOverlay{
@@ -464,18 +488,19 @@ func (m *Model) pushModelPicker(role reasoner.Role) {
 		footnote:   "free-form ids: /model " + string(role) + " <id>",
 		onSelect: func(m *Model, it listItem) tea.Cmd {
 			prov, id, _ := strings.Cut(it.key, "\x00")
-			if m.controls.SetProvider != nil {
-				_ = m.controls.SetProvider(role, prov)
-			}
-			if m.controls.SetModel != nil {
-				if err := m.controls.SetModel(role, id); err != nil {
+			if m.controls != nil {
+				chatP, chatM, batchP, batchM := settingsArgsFor(role, prov, id)
+				if err := m.controls.SaveSettings(context.Background(), chatP, chatM, batchP, batchM); err != nil {
 					return m.note(err.Error())
 				}
 			}
-			if role == reasoner.RoleChat {
+			switch role {
+			case RoleChat:
+				m.settings.Chat = apiclient.RoleSettings{Provider: prov, Model: id}
 				m.provider = prov
+			case RoleBatch:
+				m.settings.Batch = apiclient.RoleSettings{Provider: prov, Model: id}
 			}
-			m.saveSettings()
 			m.pop()
 			return m.note(string(role) + " model → " + prov + "·" + id)
 		},
@@ -491,13 +516,12 @@ func (m *Model) pushModePicker() {
 			{key: "autonomous", label: "autonomous", hint: "agent signs orders", on: m.mode == "autonomous"},
 		},
 		onSelect: func(m *Model, it listItem) tea.Cmd {
-			if m.controls.SetMode != nil {
-				if err := m.controls.SetMode(it.key); err != nil {
+			if m.controls != nil {
+				if err := m.controls.SetMode(context.Background(), it.key); err != nil {
 					return m.note("mode: " + err.Error())
 				}
 			}
 			m.mode = it.key
-			m.saveSettings()
 			m.pop()
 			return m.note("execution mode → " + it.key)
 		},

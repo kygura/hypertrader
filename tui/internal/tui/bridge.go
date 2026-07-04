@@ -1,55 +1,67 @@
-// The channel→Msg bridge. The TUI is a bus consumer: store/journal updates
-// arrive as tea.Msg via this goroutine calling p.Send(...). The render loop never
-// blocks on network or LLM — if the TUI dies, the daemon trades on.
+// The channel→Msg bridge. THIS FILE IS A COMPILE-TIME STUB for Task 8: it
+// defines the tea.Msg envelope types the rest of the package (chiefly
+// update.go) switches on, backed by apiclient types instead of the backend's
+// internal bus/metrics packages. Nothing populates these yet — Task 9
+// rewrites this file into a real WebSocket client that dispatches these (or
+// equivalent) messages from the daemon's /ws push stream. The render loop
+// still never blocks on network or LLM once that lands.
 package tui
 
 import (
-	"context"
-
 	tea "charm.land/bubbletea/v2"
-	"github.com/hyperagent/hyperagent/internal/bus"
-	"github.com/hyperagent/hyperagent/internal/metrics"
+
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
-// Sender is the minimal interface the bridge needs from a tea.Program.
+// Sender is the minimal interface the bridge needs from a tea.Program. Kept
+// here so Task 9's WS client can depend on it without touching call sites.
 type Sender interface {
 	Send(tea.Msg)
 }
 
-// Tea messages mirroring bus events.
+// statusKind discriminates what a statusMsg is asserting, so consumers read
+// only the fields that event owns — mirrors backend/internal/bus.StatusKind's
+// two values locally (bus is backend-internal and this module cannot import
+// it).
+type statusKind int
+
+const (
+	// statusNotice is a transient message (reasoner error, history-write
+	// failure). It carries Detail and optionally Provider; it must not touch
+	// connection state.
+	statusNotice statusKind = iota
+	// statusConn asserts the websocket connection state via Connected.
+	statusConn
+)
+
+// Tea messages the render loop reacts to, mirroring the shape of
+// backend/internal/bus events. Task 9's WS client produces these from real
+// server push frames.
 type (
-	barMsg       metrics.Bar
-	verdictMsg   metrics.Verdict
-	journalMsg   bus.JournalEvent
-	statusMsg    bus.StatusEvent
-	positionMsg  metrics.Position
+	barMsg     apiclient.Bar
+	verdictMsg apiclient.Verdict
+
+	// journalMsg mirrors backend/internal/bus.JournalEvent.
+	journalMsg struct {
+		Coin    string
+		Kind    string // "candidate" | "fill" | "open" | "close" | "alert" | "error"
+		Summary string
+		Verdict *apiclient.Verdict // non-nil for candidate events
+	}
+
+	// statusMsg mirrors backend/internal/bus.StatusEvent.
+	statusMsg struct {
+		Kind      statusKind
+		Connected bool // authoritative only when Kind == statusConn
+		Provider  string
+		Mode      string // "propose" | "autonomous"
+		Detail    string
+	}
+
+	positionMsg apiclient.Position
+
 	chatReplyMsg struct {
 		text string
 		err  error
 	}
 )
-
-// PumpBus subscribes to the bus and forwards every event into the program as a
-// typed tea.Msg. Runs until ctx is cancelled. Each subscription gets its own
-// goroutine so a slow topic never starves another.
-func PumpBus(ctx context.Context, b *bus.Bus, p Sender) {
-	go pump(ctx, b.SubscribeBars(1024), p, func(v metrics.Bar) tea.Msg { return barMsg(v) })
-	go pump(ctx, b.SubscribeVerdicts(256), p, func(v metrics.Verdict) tea.Msg { return verdictMsg(v) })
-	go pump(ctx, b.SubscribeJournal(256), p, func(v bus.JournalEvent) tea.Msg { return journalMsg(v) })
-	go pump(ctx, b.SubscribeStatus(64), p, func(v bus.StatusEvent) tea.Msg { return statusMsg(v) })
-	go pump(ctx, b.SubscribePositions(64), p, func(v metrics.Position) tea.Msg { return positionMsg(v) })
-}
-
-func pump[T any](ctx context.Context, ch <-chan T, p Sender, wrap func(T) tea.Msg) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case v, ok := <-ch:
-			if !ok {
-				return
-			}
-			p.Send(wrap(v))
-		}
-	}
-}

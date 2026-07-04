@@ -4,29 +4,29 @@ import (
 	"image/color"
 	"strings"
 
-	"github.com/hyperagent/hyperagent/internal/signal"
+	"github.com/hyperagent/tui/internal/signal"
 )
 
 // This file is the glue between the signal package's cross-timeframe confluence and
-// the views that render it (markets table + detail panel). The store holds rings for
+// the views that render it (markets table + detail panel). The cache holds rings for
 // the whole display timeframe set per visualized coin, so confluence reads real
 // multi-timeframe data rather than the single noisy bar the panel used to show.
 
 // confluenceInputs assembles per-timeframe interpretation inputs for a coin from the
-// store across the standard timeframe set, weighted so higher timeframes count more.
+// cache across the standard timeframe set, weighted so higher timeframes count more.
 func (m *Model) confluenceInputs(coin string) []signal.TimeframeInput {
 	weights := signal.DefaultWeights()
-	ctx, _ := m.store.AssetCtx(coin)
+	ctx, _ := m.cache.AssetCtx(coin)
 	tfs := make([]signal.TimeframeInput, 0, len(m.tfCycle))
 	for _, tf := range m.tfCycle { // {"15m","1h","4h","1d"}
-		bar, ok := m.store.LatestBar(coin, tf)
+		bar, ok := m.cache.LatestBar(coin, tf)
 		if !ok {
 			continue
 		}
 		tfs = append(tfs, signal.TimeframeInput{
 			Timeframe: tf,
 			Weight:    weights[tf],
-			In:        signal.Inputs{Cur: bar, History: m.store.History(coin, tf, 48), Ctx: ctx},
+			In:        signal.Inputs{Cur: bar, History: m.cache.History(coin, tf, 48), Ctx: ctx},
 		})
 	}
 	return tfs

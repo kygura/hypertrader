@@ -194,8 +194,8 @@ func (m *Model) renderTicker() string {
 		return ansi.Truncate(" "+conn, m.width, "…")
 	}
 	dot := lipgloss.NewStyle().Foreground(m.theme.AssetColor(m.assetIndex(coin))).Render("●")
-	bar, _ := m.store.LatestBar(coin, m.timeframes[coin])
-	px := m.store.Mid(coin)
+	bar, _ := m.cache.LatestBar(coin, m.timeframes[coin])
+	px := m.cache.Mid(coin)
 	if px == 0 {
 		px = bar.Close
 	}
