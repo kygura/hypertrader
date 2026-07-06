@@ -7,7 +7,7 @@ Hypertrader runs a trading desk that never sleeps: it ingests markets continuous
 
 ## Thesis
 
-**A trading thesis dies of neglect, not of being wrong.**
+**Attention, not judgement, is the trading bottleneck.**
 
 On-chain markets solved access. Anyone, anywhere, can hold a position on a venue that never closes, with custody in their own hands.
 

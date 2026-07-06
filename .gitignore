@@ -3,6 +3,7 @@ dist/
 *.env
 .env
 
+backend/.env
 backend/hyperagent
 backend/data/journal/
 graphify-out/
