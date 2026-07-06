@@ -5,6 +5,7 @@
 package cockpit
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -116,6 +117,28 @@ func signed(s string, v float64, w int) string {
 		return greenStyle.Render(s)
 	}
 	return redStyle.Render(s)
+}
+
+// cvdStr abbreviates a cumulative-volume-delta value with a K/M/B suffix
+// scaled to its own magnitude, rather than a single fixed divisor — CVD is
+// in base-asset units and ranges from single digits (BTC) to millions
+// (DOGE) across the visualized watchlist, so no one fixed scale reads well
+// for every coin.
+func cvdStr(v float64) string {
+	av := v
+	if av < 0 {
+		av = -av
+	}
+	switch {
+	case av >= 1e9:
+		return fmt.Sprintf("%+.1fB", v/1e9)
+	case av >= 1e6:
+		return fmt.Sprintf("%+.1fM", v/1e6)
+	case av >= 1e3:
+		return fmt.Sprintf("%+.1fK", v/1e3)
+	default:
+		return fmt.Sprintf("%+.0f", v)
+	}
 }
 
 // fnum formats with thousands separators.

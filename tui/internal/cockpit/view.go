@@ -135,8 +135,18 @@ func envelopeLine(label, val, extra string, ok bool, cw int) string {
 
 func (m *Model) marketsView(w, h int) string {
 	var lines []string
+	// Funding is the daemon's per-hour rate (backend/internal/metrics.AssetCtx.Funding
+	// doc: "current funding rate (per hour, as a fraction)") — labelled FUND/1H,
+	// not the 8h convention some other venues use. OIDelta is also a fraction
+	// of the previous bar (backend/internal/metrics.Bar.OIDelta doc), so it
+	// needs the same *100 treatment as Funding to read as a percent; the
+	// reasoner's own logging (backend/internal/reasoner/context.go) does the
+	// same bar.OIDelta*100. CVD is a raw cumulative-volume-delta in base-asset
+	// units whose magnitude varies by orders of magnitude across coins (single
+	// digits for BTC, millions for DOGE) — a fixed /1e6 divisor read as ~0.0M
+	// for most coins, so it's abbreviated adaptively instead (see cvdStr).
 	lines = append(lines, dimStyle.Render(padR("MKT", 5)+"  "+padL("LAST", 10)+"  "+
-		padL("FUND/8H", 9)+"  "+padL("OIΔ", 7)+"  "+padL("CVD", 8)))
+		padL("FUND/1H", 9)+"  "+padL("OIΔ", 7)+"  "+padL("CVD", 8)))
 
 	for _, coin := range m.visualized {
 		mid := m.cache.Mid(coin)
@@ -145,14 +155,14 @@ func (m *Model) marketsView(w, h int) string {
 			funding = ctx.Funding * 100
 		}
 		if b, ok := m.cache.LatestBar(coin, m.tf(coin)); ok {
-			oiDelta = b.OIDelta
-			cvd = b.CVD / 1e6
+			oiDelta = b.OIDelta * 100
+			cvd = b.CVD
 		}
 		row := brightStyle.Render(padR(coin, 5)) + "  " +
 			textStyle.Render(padL(fnum(mid, priceDec(mid)), 10)) + "  " +
 			signed(fmt.Sprintf("%+.4f%%", funding), funding, 9) + "  " +
-			signed(fmt.Sprintf("%+.2f", oiDelta), oiDelta, 7) + "  " +
-			signed(fmt.Sprintf("%+.1fM", cvd), cvd, 8)
+			signed(fmt.Sprintf("%+.2f%%", oiDelta), oiDelta, 7) + "  " +
+			signed(cvdStr(cvd), cvd, 8)
 		lines = append(lines, row)
 	}
 

@@ -5,6 +5,7 @@ dist/
 
 backend/.env
 backend/hyperagent
+tui/hyperagent-tui
 backend/data/journal/
 graphify-out/
 

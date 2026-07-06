@@ -2,9 +2,20 @@
 
 Standalone terminal client for the `hyperagent` daemon (`backend/`). Holds no
 market-data or execution state of its own — everything comes from the
-daemon's unified HTTP+WS core API (`backend/internal/api`). Bubble Tea UI,
-same look and workflow as the TUI that used to run in-process inside the
-daemon; the only thing that changed is the transport.
+daemon's unified HTTP+WS core API (`backend/internal/api`). Bubble Tea
+cockpit UI: four panels plus a chat bottom bar, minimum terminal size
+96×28.
+
+- **MANDATE** — risk envelope (exposure, open count, uPnL, compiled gate
+  states).
+- **MARKET PICTURE** — live ingest for the visualized watchlist.
+- **EXECUTION** — the same compiled risk gates as MANDATE, rendered as
+  pass/breach state.
+- **DECISION JOURNAL** — streamed candidate/fill/open/close/alert/error
+  events; swaps out for the **AGENT** chat panel while chat is open.
+
+Keys: `/` opens chat, `m` toggles propose/autonomous mode, `q` (or
+`ctrl+c`) quits.
 
 ## Build & run
 
@@ -39,12 +50,14 @@ for `curl` or the web dashboard.
 
 ## Module layout
 
-- `src/` — entrypoint (flag parsing, wiring `apiclient` + `internal/tui` +
+- `src/` — entrypoint (flag parsing, wiring `apiclient` + `internal/cockpit` +
   Bubble Tea program).
 - `internal/apiclient/` — typed HTTP+WS client for the daemon's `/api/*`
   surface; the only thing that talks to the network.
-- `internal/tui/` — Bubble Tea model/views; takes an `apiclient.Client` as
-  its `Controls` dependency, never dials the network directly.
+- `internal/cockpit/` — Bubble Tea model/views for the cockpit layout above,
+  plus the WS bridge (`PumpWS`/`PollMarkets`) that turns daemon push frames
+  into Bubble Tea messages; takes an `apiclient.Client` as its `Controls`
+  dependency, never dials the network directly itself.
 
 This is its own Go module (`github.com/hyperagent/tui`) with no dependency
 on `backend/`'s internals — only on the JSON shapes the daemon's HTTP API
