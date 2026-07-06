@@ -108,8 +108,6 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.chatOpen = true
 		return m, m.input.Focus()
-	case "esc":
-		m.chatOpen = false
 	}
 	return m, nil
 }

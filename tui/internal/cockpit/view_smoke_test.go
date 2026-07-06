@@ -46,6 +46,47 @@ func TestViewSmoke(t *testing.T) {
 	}
 }
 
+// TestMandateAndExecutionAgreeOnMaxPosBreach seeds a position whose notional
+// exceeds MaxPositionUSD and asserts the MANDATE panel's MAX POS line and the
+// EXECUTION panel's max-position gate report the same breach — they must
+// derive from the same gateStates and can no longer disagree.
+func TestMandateAndExecutionAgreeOnMaxPosBreach(t *testing.T) {
+	cache := apiclient.NewCache()
+	cache.PutMid("ETH", 3412.4)
+	cache.ApplyMarkets([]apiclient.MarketEntry{{
+		Coin:     "ETH",
+		Mid:      3412.4,
+		Position: apiclient.Position{Coin: "ETH", Size: 2, EntryPrice: 3400, MarkPrice: 3412.4, UnrealPnl: 25.1},
+	}})
+
+	m := New(Config{
+		Cache: cache,
+		Settings: apiclient.SettingsResponse{
+			Mode:       "propose",
+			Visualized: []string{"ETH"},
+			Timeframes: map[string]string{"ETH": "1h"},
+			// notional = 2 * 3412.4 = 6824.8, exceeds MaxPositionUSD.
+			Risk: apiclient.RiskSettings{MaxPositionUSD: 5000, MaxTotalExposureUSD: 10000, MaxConcurrent: 3, DailyLossKillUSD: 500},
+		},
+	})
+	m.Update(tea.WindowSizeMsg{Width: 110, Height: 30})
+
+	mandate := m.mandateView(leftColW, topRowH)
+	execution := m.positionsView(leftColW, topRowH)
+
+	if !strings.Contains(mandate, "MAX POS") || !strings.Contains(mandate, "● breach") {
+		t.Errorf("MANDATE MAX POS line does not show breach:\n%s", mandate)
+	}
+	if !strings.Contains(execution, "✗ ") || !strings.Contains(execution, "max position") {
+		t.Errorf("EXECUTION max-position gate does not show breach:\n%s", execution)
+	}
+
+	gates := m.gates()
+	if gates.MaxPosOK {
+		t.Errorf("gates.MaxPosOK = true, want false for breaching position")
+	}
+}
+
 func TestViewTooSmall(t *testing.T) {
 	m := New(Config{Cache: apiclient.NewCache()})
 	m.Update(tea.WindowSizeMsg{Width: 50, Height: 10})

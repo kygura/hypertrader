@@ -99,6 +99,7 @@ func (m *Model) chatBarView() string {
 func (m *Model) mandateView(w, h int) string {
 	cw := w - 4
 	env := m.envelope()
+	gates := m.gates()
 	var lines []string
 
 	lines = append(lines, dimStyle.Render(padR("MODE", 12))+brightStyle.Render(strings.ToUpper(m.mode)))
@@ -115,8 +116,8 @@ func (m *Model) mandateView(w, h int) string {
 	lines = append(lines, "")
 
 	lines = append(lines, envelopeLine("POSITIONS", fmt.Sprintf("%d", env.OpenCount),
-		fmt.Sprintf("/ %d max", env.Risk.MaxConcurrent), env.OpenCount <= env.Risk.MaxConcurrent, cw))
-	lines = append(lines, envelopeLine("MAX POS", "$"+fnum(env.Risk.MaxPositionUSD, 0), "per position", true, cw))
+		fmt.Sprintf("/ %d max", env.Risk.MaxConcurrent), gates.ConcurrencyOK, cw))
+	lines = append(lines, envelopeLine("MAX POS", "$"+fnum(env.Risk.MaxPositionUSD, 0), "per position", gates.MaxPosOK, cw))
 	lines = append(lines, envelopeLine("uPnL", fmt.Sprintf("%+.2f", env.UPnL), "unrealized", env.UPnL >= 0, cw))
 	lines = append(lines, envelopeLine("KILL-SWITCH", "$"+fnum(env.Risk.DailyLossKillUSD, 0), "daily loss · armed", true, cw))
 
@@ -192,40 +193,28 @@ func (m *Model) positionsView(w, h int) string {
 	}
 	lines = append(lines, "")
 
-	// Compiled risk gates, pass/state derived from live utilization.
+	// Compiled risk gates — same gateStates the MANDATE panel renders, so
+	// the two panels can never disagree on pass/fail.
+	gateStates := m.gates()
 	pass := 0
 	type gateRow struct {
 		name string
 		ok   bool
 	}
-	maxPosOK := true
-	for _, coin := range m.visualized {
-		p := m.cache.Position(coin)
-		if p.IsFlat() {
-			continue
-		}
-		n := p.Size * p.MarkPrice
-		if n < 0 {
-			n = -n
-		}
-		if env.Risk.MaxPositionUSD > 0 && n > env.Risk.MaxPositionUSD {
-			maxPosOK = false
-		}
-	}
-	gates := []gateRow{
-		{fmt.Sprintf("max position $%s", fnum(env.Risk.MaxPositionUSD, 0)), maxPosOK},
-		{fmt.Sprintf("max exposure $%s", fnum(env.Risk.MaxTotalExposureUSD, 0)), env.Risk.MaxTotalExposureUSD == 0 || env.ExposureUSD <= env.Risk.MaxTotalExposureUSD},
-		{fmt.Sprintf("max concurrency %d/%d", env.OpenCount, env.Risk.MaxConcurrent), env.Risk.MaxConcurrent == 0 || env.OpenCount <= env.Risk.MaxConcurrent},
+	gateRows := []gateRow{
+		{fmt.Sprintf("max position $%s", fnum(env.Risk.MaxPositionUSD, 0)), gateStates.MaxPosOK},
+		{fmt.Sprintf("max exposure $%s", fnum(env.Risk.MaxTotalExposureUSD, 0)), gateStates.ExposureOK},
+		{fmt.Sprintf("max concurrency %d/%d", env.OpenCount, env.Risk.MaxConcurrent), gateStates.ConcurrencyOK},
 		{fmt.Sprintf("daily-loss kill-switch $%s · armed", fnum(env.Risk.DailyLossKillUSD, 0)), true},
 	}
-	for _, g := range gates {
+	for _, g := range gateRows {
 		if g.ok {
 			pass++
 		}
 	}
 	lines = append(lines, spread(dimStyle.Render("RISK GATES — compiled"),
-		titleStyle.Render(fmt.Sprintf("%d/%d PASS", pass, len(gates))), cw))
-	for _, g := range gates {
+		titleStyle.Render(fmt.Sprintf("%d/%d PASS", pass, len(gateRows))), cw))
+	for _, g := range gateRows {
 		mark := greenStyle.Render("✓ ")
 		if !g.ok {
 			mark = redStyle.Render("✗ ")

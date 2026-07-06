@@ -97,14 +97,27 @@ func (m *Model) tf(coin string) string {
 	return "1h"
 }
 
-// envelope computes live risk utilization from the visualized watchlist's
-// cached positions.
-func (m *Model) envelope() envelope {
+// positions returns the live cached positions for the visualized watchlist.
+func (m *Model) positions() []apiclient.Position {
 	positions := make([]apiclient.Position, 0, len(m.visualized))
 	for _, coin := range m.visualized {
 		positions = append(positions, m.cache.Position(coin))
 	}
-	return computeEnvelope(positions, m.risk)
+	return positions
+}
+
+// envelope computes live risk utilization from the visualized watchlist's
+// cached positions.
+func (m *Model) envelope() envelope {
+	return computeEnvelope(m.positions(), m.risk)
+}
+
+// gates computes the compiled pass/fail state of the risk gates — the
+// single source of truth both MANDATE and EXECUTION panels render from, so
+// they can never disagree.
+func (m *Model) gates() gateStates {
+	positions := m.positions()
+	return computeGates(positions, computeEnvelope(positions, m.risk))
 }
 
 // note appends an operator-side journal entry (not from the bus).
