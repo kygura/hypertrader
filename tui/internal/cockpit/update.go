@@ -7,6 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/hyperagent/tui/internal/apiclient"
 )
 
 // Update implements tea.Model.
@@ -132,9 +134,33 @@ func (m *Model) toggleMode() tea.Cmd {
 	}
 }
 
-// submit routes the chat bar's input; Task 4 replaces this stub with the
-// command dispatcher + chat call.
+// submit routes the chat bar's input: slash commands run through the
+// dispatcher and record their output as a system turn; anything else is a
+// user turn sent to the agent.
 func (m *Model) submit(text string) tea.Cmd {
+	if isCommand(text) {
+		m.turns = append(m.turns, chatTurn("user", text))
+		out, cmd := m.runCommand(text)
+		if out != "" {
+			m.turns = append(m.turns, chatTurn("system", out))
+		}
+		return cmd
+	}
 	m.turns = append(m.turns, chatTurn("user", text))
-	return nil
+	if m.chatFn == nil {
+		m.turns = append(m.turns, chatTurn("system", "chat unavailable — no daemon connection"))
+		return nil
+	}
+	m.busy = true
+	return tea.Batch(m.sendChat(text), m.spin.Tick)
+}
+
+// sendChat calls the daemon chat endpoint off the render loop.
+func (m *Model) sendChat(text string) tea.Cmd {
+	history := append([]apiclient.ChatTurn(nil), m.turns...)
+	fn := m.chatFn
+	return func() tea.Msg {
+		reply, err := fn(context.Background(), text, history)
+		return chatReplyMsg{text: reply, err: err}
+	}
 }
