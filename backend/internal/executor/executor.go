@@ -28,14 +28,24 @@ type RiskConfig struct {
 	Mode                string // "propose" | "autonomous"
 	MaxPositionUSD      float64
 	MaxTotalExposureUSD float64
+	MaxPositionPct      float64 // fraction of account equity per position; 0 disables
+	MaxTotalExposurePct float64 // fraction of account equity across positions; 0 disables
 	MaxConcurrent       int
 	DailyLossKillUSD    float64
 	MaxPriceDeviation   float64 // allowed |verdict price - live mid| / mid
 	PostStopCooldown    time.Duration
 }
 
-// AssetIndex resolves a coin to its HL perp asset id.
-type AssetIndex map[string]int
+// AssetInfo carries what order construction needs about one perp asset: its HL
+// asset id (the coin's position in the meta universe) and the venue's size
+// precision.
+type AssetInfo struct {
+	ID         int
+	SzDecimals int
+}
+
+// AssetIndex resolves a coin to its HL perp asset id and size precision.
+type AssetIndex map[string]AssetInfo
 
 // MarketState is what the risk gates need to see: open positions and live
 // per-asset context. The daemon passes the live *store.Store; the MCP server
@@ -43,6 +53,17 @@ type AssetIndex map[string]int
 type MarketState interface {
 	Positions() []metrics.Position
 	AssetCtx(coin string) (metrics.AssetCtx, bool)
+	// AccountValue is the venue-reported account equity in USD; 0 means no
+	// snapshot yet, which the capital-relative gates treat as unknown.
+	AccountValue() float64
+}
+
+// ThesisState is the read side of the thesis store the thesis gate consults.
+// An interface (like MarketState) so the daemon passes the live *thesis.Store
+// while tests stub it; nil means no store is wired, which the trigger path
+// treats as "no live thesis" — fail closed, exactly like the capital gates.
+type ThesisState interface {
+	Get(coin string) (metrics.Thesis, bool)
 }
 
 // Executor applies risk gates and (in autonomous mode) submits signed orders.
@@ -56,6 +77,7 @@ type Executor struct {
 	apiURL  string
 	mainnet bool
 	http    *http.Client
+	theses  ThesisState // nil until SetTheses; trigger verdicts then fail closed
 
 	proposals *ProposalRegistry
 
@@ -82,6 +104,11 @@ func New(cfg RiskConfig, b *bus.Bus, s MarketState, j *journal.Journal, signer *
 		proposals:     NewProposalRegistry(0),
 	}
 }
+
+// SetTheses wires the thesis store the trigger-path thesis gate reads. Called
+// once at wiring time (a setter, not a New parameter, so the MCP server — which
+// has no thesis pipeline — keeps its construction unchanged).
+func (e *Executor) SetTheses(ts ThesisState) { e.theses = ts }
 
 // Proposals returns the shared proposal registry. Telegram's inline buttons
 // and the API's approve/reject endpoints both resolve against it — one
@@ -123,6 +150,18 @@ func (e *Executor) Handle(v reasoner.Verdict) {
 
 	if !v.Action.IsTrade() {
 		return // hold / alert_only: nothing to execute
+	}
+
+	// Thesis gate: a trigger-path verdict is a scalp against the maintained
+	// view, so it needs the thesis's authorization — refused before it can
+	// even become a proposal. Review-path (and legacy) verdicts pass under
+	// the existing rules; the review itself IS the thesis decision.
+	if err := e.thesisGate(v); err != nil {
+		_ = e.journal.Record(journal.Entry{
+			Coin: v.Asset, Kind: "error",
+			Summary: err.Error(), Verdict: &v,
+		})
+		return
 	}
 
 	// Propose mode, or per-asset confirmation required: never auto-send.
@@ -220,11 +259,11 @@ func (e *Executor) Cancel(ctx context.Context, coin string, oid uint64) error {
 	if e.signer == nil {
 		return fmt.Errorf("no signer configured")
 	}
-	assetID, ok := e.assets[coin]
+	asset, ok := e.assets[coin]
 	if !ok {
 		return fmt.Errorf("unknown asset id for %s", coin)
 	}
-	action := buildCancelAction(assetID, oid)
+	action := buildCancelAction(asset.ID, oid)
 	nonce := uint64(time.Now().UnixMilli())
 	sig, err := e.signer.SignL1Action(action, nonce, nil, e.mainnet)
 	if err != nil {
@@ -236,6 +275,45 @@ func (e *Executor) Cancel(ctx context.Context, coin string, oid uint64) error {
 	_ = e.journal.Record(journal.Entry{
 		Coin: coin, Kind: "alert", Summary: fmt.Sprintf("cancelled oid %d (mcp)", oid),
 	})
+	return nil
+}
+
+// thesisGate is the deterministic scalp-policy check: verdicts produced by the
+// trigger tier may only trade in the direction of a live thesis. Close (and the
+// non-trade actions filtered before this) is always allowed — exiting risk
+// never needs permission. Errors carry the exact journaled refusal reason.
+func (e *Executor) thesisGate(v reasoner.Verdict) error {
+	if v.Source != metrics.DigestTrigger || v.Action == reasoner.ActionClose {
+		return nil
+	}
+	if e.theses == nil {
+		return fmt.Errorf("thesis-gate: no live thesis")
+	}
+	th, ok := e.theses.Get(v.Asset)
+	if !ok {
+		return fmt.Errorf("thesis-gate: no live thesis")
+	}
+	var want string
+	switch v.Action {
+	case reasoner.ActionOpenLong:
+		want = "long"
+	case reasoner.ActionOpenShort:
+		want = "short"
+	case reasoner.ActionScale:
+		// Scaling extends the open position's direction; a flat book has no
+		// direction to scale, which can never match.
+		for _, p := range e.store.Positions() {
+			if p.Coin == v.Asset && p.IsLong() {
+				want = "long"
+			} else if p.Coin == v.Asset && p.IsShort() {
+				want = "short"
+			}
+		}
+	}
+	// A "neutral" thesis means "stay out" — it matches no trade direction.
+	if want == "" || th.Direction != want {
+		return fmt.Errorf("thesis-gate: direction mismatch")
+	}
 	return nil
 }
 
@@ -252,8 +330,30 @@ func (e *Executor) riskCheck(v reasoner.Verdict) error {
 	if until, ok := e.cooldownUntil[v.Asset]; ok && time.Now().Before(until) {
 		return fmt.Errorf("post-stop cooldown until %s", until.Format(time.Kitchen))
 	}
-	if v.SizeUSD > e.cfg.MaxPositionUSD {
-		return fmt.Errorf("size %.0f exceeds max position %.0f", v.SizeUSD, e.cfg.MaxPositionUSD)
+	// Capital-relative caps compose with the absolute USD gates: the effective
+	// cap is the stricter of the two. Equity 0 means the venue snapshot hasn't
+	// landed; sizing against unknown capital is refused (fail closed) for any
+	// exposure-increasing action — reduce/close always passes these gates.
+	increases := v.Action == reasoner.ActionOpenLong || v.Action == reasoner.ActionOpenShort || v.Action == reasoner.ActionScale
+	equity := e.store.AccountValue()
+	pctConfigured := e.cfg.MaxPositionPct > 0 || e.cfg.MaxTotalExposurePct > 0
+	if pctConfigured && equity <= 0 && increases {
+		return fmt.Errorf("account equity unknown; capital-relative gates refuse new exposure")
+	}
+	maxPosition := e.cfg.MaxPositionUSD
+	if e.cfg.MaxPositionPct > 0 && equity > 0 {
+		if cap := equity * e.cfg.MaxPositionPct; cap < maxPosition {
+			maxPosition = cap
+		}
+	}
+	maxExposure := e.cfg.MaxTotalExposureUSD
+	if e.cfg.MaxTotalExposurePct > 0 && equity > 0 {
+		if cap := equity * e.cfg.MaxTotalExposurePct; cap < maxExposure {
+			maxExposure = cap
+		}
+	}
+	if v.SizeUSD > maxPosition {
+		return fmt.Errorf("size %.0f exceeds max position %.0f", v.SizeUSD, maxPosition)
 	}
 
 	// Total exposure across open positions + this candidate.
@@ -269,8 +369,8 @@ func (e *Executor) riskCheck(v reasoner.Verdict) error {
 			return fmt.Errorf("would exceed max concurrent positions %d", e.cfg.MaxConcurrent)
 		}
 	}
-	if exposure > e.cfg.MaxTotalExposureUSD {
-		return fmt.Errorf("total exposure %.0f exceeds max %.0f", exposure, e.cfg.MaxTotalExposureUSD)
+	if exposure > maxExposure {
+		return fmt.Errorf("total exposure %.0f exceeds max %.0f", exposure, maxExposure)
 	}
 
 	// Sanity: verdict price within X% of live mid.
@@ -319,7 +419,7 @@ func (e *Executor) submit(ctx context.Context, v reasoner.Verdict) error {
 	if e.signer == nil {
 		return fmt.Errorf("no signer configured")
 	}
-	assetID, ok := e.assets[v.Asset]
+	asset, ok := e.assets[v.Asset]
 	if !ok {
 		return fmt.Errorf("unknown asset id for %s", v.Asset)
 	}
@@ -339,10 +439,18 @@ func (e *Executor) submit(ctx context.Context, v reasoner.Verdict) error {
 			price = mark * (1 - e.cfg.MaxPriceDeviation)
 		}
 	}
-	size := v.SizeUSD / price
+	// The venue rejects size/price strings carrying more precision than the
+	// asset allows — rounding to szDecimals happens here, at the wire boundary,
+	// after every gate has evaluated the verdict's exact values.
+	price = roundPrice(price, asset.SzDecimals)
+	size := roundSize(v.SizeUSD/price, asset.SzDecimals)
+	if size <= 0 {
+		return fmt.Errorf("size %.2f USD rounds to zero %s at price %v (szDecimals %d)",
+			v.SizeUSD, v.Asset, price, asset.SzDecimals)
+	}
 
 	order := OrderRequest{
-		AssetID:    assetID,
+		AssetID:    asset.ID,
 		IsBuy:      v.Action == reasoner.ActionOpenLong || v.Action == reasoner.ActionScale,
 		Price:      price,
 		Size:       size,

@@ -105,7 +105,7 @@ func newFakeExchangeExecutor(t *testing.T) (*Executor, *httptest.Server, *int) {
 		t.Fatal(err)
 	}
 	cfg := baseRisk()
-	e := New(cfg, b, st, jr, signer, AssetIndex{"ETH": 1}, srv.URL, false)
+	e := New(cfg, b, st, jr, signer, AssetIndex{"ETH": {ID: 1, SzDecimals: 4}}, srv.URL, false)
 	return e, srv, &calls
 }
 

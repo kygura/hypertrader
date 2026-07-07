@@ -1,7 +1,7 @@
-# Hypertrader: an autonomous trading operator, built on Hyperliquid
+# Hyperion: an autonomous trading operator, built on Hyperliquid
 
 **One-liner:** An autonomous trading operator, built on Hyperliquid.
-Hypertrader runs a trading desk that never sleeps: it ingests markets continuously, reasons about them in writing, and executes toward the financial goals you state in plain language.
+Hyperion runs a trading desk that never sleeps: it ingests markets continuously, reasons about them in writing, and executes toward the financial goals you state in plain language.
 
 ---
 
@@ -23,7 +23,7 @@ This isn't unique to trading. Travel platforms are shipping agents that search, 
 
 Industry estimates already put the agentic economy in the trillions of dollars of annual activity by the end of the decade. Markets are the sharpest edge of it: liquid, quantifiable, and open around the clock.
 
-We think trading is the leading edge of the agentic economy, not a side case of it. Hypertrader is built for that edge first: an autonomous trading operator sitting between a trader's mandate and the venue.
+We think trading is the leading edge of the agentic economy, not a side case of it. Hyperion is built for that edge first: an autonomous trading operator sitting between a trader's mandate and the venue.
 
 ## Product: one loop, running continuously
 
@@ -78,9 +78,9 @@ The **hosted trading operator**: a web application where a user states a mandate
 |---|---|---|
 | **TAM**, agent-mediated economic activity, global | ~$20T/yr by 2030 | The broad shift: agents executing on stated intent across commerce, finance, and services. Midpoint of published estimates. PwC projects $2.6–4.4T in annual GDP contribution from agentic AI by 2030; McKinsey projects ~$13T in additional economic output from AI agents, $3–5T of that in agentic commerce alone. |
 | **SAM**, on-chain markets an agent can execute against | ~$3T/yr by 2030 | On-chain spot and derivatives volume, extrapolated from current trajectory. Hyperliquid alone has cleared $4.4T in cumulative perp volume to date and runs at a multi-hundred-billion-dollar monthly clip (DefiLlama); on-chain venues broadly scale with it as agentic participation grows. |
-| **SOM**, Hypertrader's near-term wedge | ~$50M/yr addressable | Subscription + bps on flow from Hyperliquid's prosumer trader base stating mandates in the first 12–18 months. A sliver of SAM, sized to what one execution layer can actually capture early. |
+| **SOM**, Hyperion's near-term wedge | ~$50M/yr addressable | Subscription + bps on flow from Hyperliquid's prosumer trader base stating mandates in the first 12–18 months. A sliver of SAM, sized to what one execution layer can actually capture early. |
 
-*Order-of-magnitude estimates we derived, not third-party forecasts of Hypertrader specifically. Built from published agentic-AI economic-impact research (PwC, McKinsey) and on-chain volume data (DefiLlama).*
+*Order-of-magnitude estimates we derived, not third-party forecasts of Hyperion specifically. Built from published agentic-AI economic-impact research (PwC, McKinsey) and on-chain volume data (DefiLlama).*
 
 ## Roadmap
 

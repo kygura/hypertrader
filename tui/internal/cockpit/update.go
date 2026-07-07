@@ -22,7 +22,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
-	case barMsg, positionMsg:
+	case barMsg, positionMsg, thesisMsg:
 		// Data already applied to the cache by the bridge; repaint happens
 		// because a message arrived.
 		return m, nil
@@ -55,6 +55,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case statusNotice:
 			if msg.Mode != "" {
 				m.mode = msg.Mode
+			}
+			// Reasoning-tier statuses (IDLE / REVIEW <coin> <tf> /
+			// TRIGGER <coin> <tf>) drive the header phase strip — and a
+			// trigger flashes its owning card — without journaling: the
+			// journal stays events, the tier is state.
+			if tier, coin, tf, extra, ok := parseTier(msg.Detail); ok {
+				m.phase = msg.Detail
+				if tier == "TRIGGER" {
+					m.flashCard(coin, tf, extra)
+				}
+				return m, nil
 			}
 			if msg.Detail != "" {
 				m.note("OPERATOR", msg.Detail)

@@ -28,17 +28,26 @@ const (
 
 	silenceTimeout = 30 * time.Second
 	reconnectDelay = 2 * time.Second
+
+	// defaultPingInterval keeps the socket alive per Hyperliquid's documented
+	// contract: the server closes a connection that hasn't heard from the
+	// client in 60s. Sending well under that (and under silenceTimeout, so a
+	// pong response also resets the local watchdog) means a quiet subscription
+	// (e.g. a low-volume testnet coin) never gets closed for looking idle.
+	defaultPingInterval = 15 * time.Second
 )
 
 // Ingestor manages the websocket lifecycle for a set of coins.
 type Ingestor struct {
-	url     string
-	bus     *bus.Bus
-	lastMsg atomic.Int64 // unix-nano of last frame received
+	url          string
+	bus          *bus.Bus
+	lastMsg      atomic.Int64 // unix-nano of last frame received
+	pingInterval time.Duration
 
-	mu    sync.Mutex // guards coins + conn (shared with Subscribe)
-	coins []string
-	conn  *websocket.Conn // current live connection, nil when disconnected
+	mu       sync.Mutex // guards coins + conn (shared with Subscribe)
+	coins    []string
+	universe map[string]bool // perp coins the venue actually lists; nil = unfiltered
+	conn     *websocket.Conn // current live connection, nil when disconnected
 }
 
 // New builds an ingestor for the given WS url and coin list.
@@ -46,7 +55,34 @@ func New(url string, coins []string, b *bus.Bus) *Ingestor {
 	if url == "" {
 		url = MainnetWS
 	}
-	return &Ingestor{url: url, coins: append([]string(nil), coins...), bus: b}
+	return &Ingestor{url: url, coins: append([]string(nil), coins...), bus: b, pingInterval: defaultPingInterval}
+}
+
+// SetUniverse restricts per-coin WS subscriptions (trades, activeAssetCtx) to
+// venue-listed perps. Hyperliquid hard-closes the whole connection — no
+// error frame, just a dropped socket — the instant it receives a subscribe
+// for a coin outside its perp universe (confirmed against testnet: XRP/LINK,
+// both coingecko-fallback-only in this repo's warmup path, kill the
+// connection in under a second). One bad coin in a 12-coin watchlist used to
+// poison every other coin's live feed in an endlessly repeating connect/drop loop.
+// Call once at startup with the venue's meta universe; nil/empty leaves
+// filtering off (used by tests that don't dial a real venue).
+func (in *Ingestor) SetUniverse(coins []string) {
+	set := make(map[string]bool, len(coins))
+	for _, c := range coins {
+		set[c] = true
+	}
+	in.mu.Lock()
+	in.universe = set
+	in.mu.Unlock()
+}
+
+// knownCoin reports whether coin is safe to open a live per-coin subscription
+// for — true when no universe has been set (unfiltered) or when coin is in it.
+func (in *Ingestor) knownCoin(coin string) bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.universe == nil || in.universe[coin]
 }
 
 // perCoinFeeds are the per-coin subscriptions opened for every tracked coin.
@@ -68,7 +104,7 @@ func (in *Ingestor) Subscribe(coins ...string) {
 		}
 		in.coins = append(in.coins, c)
 		have[c] = true
-		if in.conn != nil {
+		if in.conn != nil && (in.universe == nil || in.universe[c]) {
 			for _, typ := range perCoinFeeds {
 				_ = in.conn.WriteJSON(subscribeMsg{Method: "subscribe", Subscription: subscriptionDef{Type: typ, Coin: c}})
 			}
@@ -125,8 +161,13 @@ func (in *Ingestor) connectAndRead(ctx context.Context) {
 		in.mu.Unlock()
 	}()
 
-	// Subscribe to the public feeds per coin.
+	// Subscribe to the public feeds per coin — skipping any coin outside the
+	// venue's perp universe (see SetUniverse: one bad coin here kills the
+	// whole connection, so this must run before any WriteJSON on this conn).
 	for _, coin := range coins {
+		if !in.knownCoin(coin) {
+			continue
+		}
 		for _, typ := range perCoinFeeds {
 			frame := subscribeMsg{Method: "subscribe", Subscription: subscriptionDef{Type: typ, Coin: coin}}
 			if err := conn.WriteJSON(frame); err != nil {
@@ -144,6 +185,7 @@ func (in *Ingestor) connectAndRead(ctx context.Context) {
 	wdCtx, cancelWD := context.WithCancel(ctx)
 	defer cancelWD()
 	go in.watchdog(wdCtx, conn)
+	go in.pinger(wdCtx, conn)
 
 	for {
 		if ctx.Err() != nil {
@@ -155,6 +197,33 @@ func (in *Ingestor) connectAndRead(ctx context.Context) {
 		}
 		in.lastMsg.Store(time.Now().UnixNano())
 		in.dispatch(data)
+	}
+}
+
+// pingMsg is the heartbeat frame Hyperliquid's WS API requires from the
+// client on quiet subscriptions; the server answers with {"channel":"pong"}.
+var pingMsg = struct {
+	Method string `json:"method"`
+}{"ping"}
+
+// pinger sends pingMsg on an interval so Hyperliquid never sees the client as
+// silent, even when the subscribed feeds themselves produce no data for a
+// while. Shares in.mu with Subscribe so writes to conn never interleave.
+func (in *Ingestor) pinger(ctx context.Context, conn *websocket.Conn) {
+	t := time.NewTicker(in.pingInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			in.mu.Lock()
+			err := conn.WriteJSON(pingMsg)
+			in.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
 	}
 }
 

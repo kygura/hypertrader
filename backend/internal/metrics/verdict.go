@@ -61,6 +61,12 @@ type Verdict struct {
 	At       time.Time `json:"-"`
 	Provider string    `json:"-"`
 	RawText  string    `json:"-"`
+
+	// Source records which reasoning tier produced the verdict (DigestReview
+	// or DigestTrigger; empty for chat/scan legacy paths). Stamped by the
+	// engine, never parsed from model output — it is the executor's
+	// authorization token for the deterministic thesis gate.
+	Source string `json:"-"`
 }
 
 // Validate enforces the schema invariants. A verdict that fails is never executed.

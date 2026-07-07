@@ -1,4 +1,4 @@
-# YC Application Prep — Hypertrader
+# YC Application Prep — Hyperion
 
 **Target batch:** Fall 2026 (October–December, in person, San Francisco)
 **On-time deadline:** **July 27, 2026, 8:00 PM PT** — two days later than we assumed (not July 25)
@@ -23,14 +23,14 @@ Sources: [ycombinator.com/apply](https://www.ycombinator.com/apply) · [howtoapp
 |---|------|--------|--------|
 | 1 | **Founder video (1 min)** | Missing | Record: all founders on camera, no script (bullet points only), no demo footage, no music/editing. Upload as **unlisted YouTube** link. YC states applicants with a video are statistically much more likely to get an interview. |
 | 2 | **Demo URL** | Missing | Optional field, but we have real product to show. Plan in §5: VHS-recorded TUI demo (MP4) + dashboard screen capture, embedded on a hosted page. |
-| 3 | **Hosted landing page** | `landing/pitch.html` exists, not deployed | Deploy as-is (static host: Vercel/Cloudflare Pages). Do not rewrite the copy — it is authored and final. |
+| 3 | **Hosted landing page** | `pitch/pitch.html` exists, not deployed | Deploy as-is (static host: Vercel/Cloudflare Pages). Do not rewrite the copy — it is authored and final. |
 | 4 | **Secrets scrub** | ⚠️ `backend/.env` holds live OpenAI/Deepseek keys in plaintext | Rotate the keys, confirm `.env` is gitignored and absent from git history **before** the repo is pushed anywhere or shown to anyone. |
 | 5 | **Dashboard README** | Still Vite template boilerplate | Replace with real build/run instructions if the repo will be shared. |
 | 6 | **Public repo?** | No git remote configured | Decide: YC does not require source access; a private repo is fine. Only needed if we want to link code. |
 
 ## 3. Application form — draft answers
 
-Answers below are adapted from `landing/PITCH.md` (the authored language). Items marked **[FOUNDERS]** need input only you can give.
+Answers below are adapted from `pitch/PITCH.md` (the authored language). Items marked **[FOUNDERS]** need input only you can give.
 
 ### Company
 
@@ -39,7 +39,7 @@ Answers below are adapted from `landing/PITCH.md` (the authored language). Items
 (46 chars)
 
 **What is your company going to make?**
-> Hypertrader runs a trading desk that never sleeps. A trader states a mandate in plain language — "reach a 60/40 ETH–stablecoin split over 90 days, drawdown under 8%, leverage capped at 2×" — and the agent does the watching: it ingests order books, funding, and flow on Hyperliquid continuously, reasons about them in writing, and executes through hard-coded risk gates. Every decision is journaled and inspectable; the user can halt at any time. The interface is a mandate, not an order ticket. We're building the hosted web product on top of a backend core that already exists and trades daily.
+> Hyperion runs a trading desk that never sleeps. A trader states a mandate in plain language — "reach a 60/40 ETH–stablecoin split over 90 days, drawdown under 8%, leverage capped at 2×" — and the agent does the watching: it ingests order books, funding, and flow on Hyperliquid continuously, reasons about them in writing, and executes through hard-coded risk gates. Every decision is journaled and inspectable; the user can halt at any time. The interface is a mandate, not an order ticket. We're building the hosted web product on top of a backend core that already exists and trades daily.
 
 **Where do you live now / where will the company be based after YC?**
 > **[FOUNDERS]**
@@ -64,7 +64,7 @@ Answers below are adapted from `landing/PITCH.md` (the authored language). Items
 > **[FOUNDERS]** — this must be personal. The thesis to anchor on: attention, not judgment, is the trading bottleneck. On-chain markets solved access; nobody solved having to be at the screen at 3 a.m. when a limit order needs replacing. We built the desk for ourselves first and use it daily — we are user zero.
 
 **Who are your competitors? What do you understand that they don't?**
-> Competitors ship bots (static strategies — 3Commas-style grid/DCA tools) or copilots (chat over charts). Everything in Hypertrader is built around the mandate: goal, horizon, risk envelope, written judgment. Three things we hold that they don't: a verifiable append-only journal (the reputation layer autonomous trading will need), one path to the wire (web app, MCP clients, and the loop share one executor and one set of compiled gates), and owned signing rather than an inherited SDK.
+> Competitors ship bots (static strategies — 3Commas-style grid/DCA tools) or copilots (chat over charts). Everything in Hyperion is built around the mandate: goal, horizon, risk envelope, written judgment. Three things we hold that they don't: a verifiable append-only journal (the reputation layer autonomous trading will need), one path to the wire (web app, MCP clients, and the loop share one executor and one set of compiled gates), and owned signing rather than an inherited SDK.
 
 **How will you make money?**
 > Subscription for the hosted agent, bps on autonomously executed flow, and enterprise licenses for funds running agent fleets. Wedge: Hyperliquid's prosumer base (~$50M/yr near-term addressable). Expansion: the execution layer for trading agents — scoped signing as a service, mandate reputation, multi-venue routing.

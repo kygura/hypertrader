@@ -81,8 +81,12 @@ type Store struct {
 	latestCtx map[string]metrics.AssetCtx // coin -> latest perp context
 	mids      map[string]float64          // coin -> latest mid (allMids feed)
 	positions map[string]metrics.Position // coin -> open position
-	ringCap   int
-	dir       string
+	// accountValue is the venue-reported account equity (USD), fed by the
+	// account poller; 0 means "no snapshot yet", which the capital-relative
+	// risk gates treat as unknown and refuse to size against.
+	accountValue float64
+	ringCap      int
+	dir          string
 }
 
 // New creates a store with the given ring capacity and on-disk history dir.
@@ -241,6 +245,29 @@ func (s *Store) AssetCtx(coin string) (metrics.AssetCtx, bool) {
 	defer s.mu.RUnlock()
 	c, ok := s.latestCtx[coin]
 	return c, ok
+}
+
+// SetAccount replaces the account snapshot wholesale: equity plus the full open
+// position set, as reported by the venue. The account poller is the single
+// writer; wholesale replacement is what clears positions closed off-daemon.
+func (s *Store) SetAccount(equity float64, positions []metrics.Position) {
+	s.mu.Lock()
+	s.accountValue = equity
+	s.positions = make(map[string]metrics.Position, len(positions))
+	for _, p := range positions {
+		if !p.IsFlat() {
+			s.positions[p.Coin] = p
+		}
+	}
+	s.mu.Unlock()
+}
+
+// AccountValue returns the last account equity reported by the venue; 0 until
+// the first poll lands (the capital-relative gates treat 0 as "unknown").
+func (s *Store) AccountValue() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.accountValue
 }
 
 // PutPosition records (or clears) the open position for an asset.

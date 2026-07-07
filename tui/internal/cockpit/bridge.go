@@ -94,7 +94,12 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // the same value passed to apiclient.New — PumpWS derives the ws(s)://.../api/ws
 // URL from it via wsURLFrom, since that helper is unexported and callers in
 // package main cannot invoke it directly.
-func PumpWS(ctx context.Context, httpBaseURL string, cache *apiclient.Cache, p *tea.Program) {
+//
+// client, when non-nil, is used to seed the thesis cache from GET /api/theses
+// after every successful dial (see seedTheses) — thesis frames missed while
+// disconnected are state, not a stream, so the snapshot fully repairs the
+// cache on reconnect.
+func PumpWS(ctx context.Context, httpBaseURL string, client *apiclient.Client, cache *apiclient.Cache, p *tea.Program) {
 	wsURL := wsURLFrom(httpBaseURL)
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
@@ -112,6 +117,13 @@ func PumpWS(ctx context.Context, httpBaseURL string, cache *apiclient.Cache, p *
 			continue
 		}
 		p.Send(statusMsg{Kind: statusConn, Connected: true})
+		// Seed the thesis snapshot before consuming push frames: a "thesis"
+		// frame read first and then overwritten by a slower snapshot apply
+		// would silently roll the card back. Frames buffer on the socket
+		// while the (time-boxed) snapshot fetch runs.
+		if client != nil {
+			seedTheses(ctx, client, cache, p)
+		}
 		readLoop(ctx, conn, cache, p)
 		conn.Close()
 		p.Send(statusMsg{Kind: statusConn, Connected: false})
@@ -165,6 +177,12 @@ func readLoop(ctx context.Context, conn *websocket.Conn, cache *apiclient.Cache,
 			if json.Unmarshal(f.Data, &e) == nil {
 				p.Send(e)
 			}
+		case "thesis":
+			var t apiclient.Thesis
+			if json.Unmarshal(f.Data, &t) == nil && t.Coin != "" {
+				cache.PutThesis(t)
+				p.Send(thesisMsg(t))
+			}
 		case "status":
 			var s statusMsg
 			if json.Unmarshal(f.Data, &s) == nil {
@@ -172,6 +190,21 @@ func readLoop(ctx context.Context, conn *websocket.Conn, cache *apiclient.Cache,
 			}
 		}
 	}
+}
+
+// seedTheses cold-starts the THESES cards from GET /api/theses. Run once per
+// successful WS (re)connect; a failure is reported as a statusNotice and the
+// next reconnect (or the live "thesis" frames themselves) retries.
+func seedTheses(ctx context.Context, client *apiclient.Client, cache *apiclient.Cache, p Sender) {
+	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ts, err := client.Theses(sctx)
+	if err != nil {
+		p.Send(statusMsg{Kind: statusNotice, Detail: "theses snapshot failed: " + err.Error()})
+		return
+	}
+	cache.ApplyTheses(ts)
+	p.Send(thesisMsg{})
 }
 
 func wsURLFrom(httpBaseURL string) string {

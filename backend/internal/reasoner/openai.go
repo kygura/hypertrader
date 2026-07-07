@@ -120,15 +120,39 @@ func bodySnippet(raw []byte) string {
 	return s
 }
 
+// defaultSystemPrompt selects the framing for a role when the request doesn't
+// override it. Shared by both adapters so a role reads identically regardless
+// of transport.
+func defaultSystemPrompt(role Role) string {
+	switch role {
+	case RoleChat:
+		return ChatSystemPrompt
+	case RoleReview:
+		return ReviewSystemPrompt
+	case RoleTrigger:
+		return TriggerSystemPrompt
+	default:
+		return SystemPrompt
+	}
+}
+
+// digestUserPrompt renders the digest payload for the non-chat roles.
+func digestUserPrompt(req Request) string {
+	switch req.Role {
+	case RoleReview:
+		return BuildReviewPrompt(req.Digests, req.Context)
+	case RoleTrigger:
+		return BuildTriggerPrompt(req.Digests, req.Context)
+	default:
+		return BuildBatchPrompt(req.Digests, req.Context)
+	}
+}
+
 // buildMessages turns a Request into chat messages for OpenAI-style APIs.
 func buildMessages(req Request) []oaiMessage {
 	system := req.System
 	if system == "" {
-		if req.Role == RoleChat {
-			system = ChatSystemPrompt
-		} else {
-			system = SystemPrompt
-		}
+		system = defaultSystemPrompt(req.Role)
 	}
 	msgs := []oaiMessage{{Role: "system", Content: system}}
 	if req.Role == RoleChat {
@@ -141,19 +165,30 @@ func buildMessages(req Request) []oaiMessage {
 		}
 		msgs = append(msgs, oaiMessage{Role: "user", Content: user})
 	} else {
-		msgs = append(msgs, oaiMessage{Role: "user", Content: BuildBatchPrompt(req.Digests, req.Context)})
+		msgs = append(msgs, oaiMessage{Role: "user", Content: digestUserPrompt(req)})
 	}
 	return msgs
 }
 
 // finishResponse turns model text into the appropriate Response for the role.
+// A review response with zero valid elements still returns successfully (with
+// its discards listed) so the engine can distinguish "nothing valid landed"
+// from a transport failure — the prior thesis versions stay either way.
 func finishResponse(req Request, text, provider, model string) (Response, error) {
-	if req.Role == RoleChat {
+	switch req.Role {
+	case RoleChat:
 		return Response{Reply: text, Model: model}, nil
+	case RoleReview:
+		reviews, discarded, err := ParseThesisReviews(text, provider)
+		if err != nil {
+			return Response{Model: model}, err
+		}
+		return Response{Reviews: reviews, Discarded: discarded, Model: model}, nil
+	default:
+		verdicts, err := ParseVerdicts(text, provider)
+		if err != nil {
+			return Response{Model: model}, err
+		}
+		return Response{Verdicts: verdicts, Model: model}, nil
 	}
-	verdicts, err := ParseVerdicts(text, provider)
-	if err != nil {
-		return Response{Model: model}, err
-	}
-	return Response{Verdicts: verdicts, Model: model}, nil
 }

@@ -65,11 +65,7 @@ type antResponse struct {
 func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error) {
 	system := req.System
 	if system == "" {
-		if req.Role == RoleChat {
-			system = ChatSystemPrompt
-		} else {
-			system = SystemPrompt
-		}
+		system = defaultSystemPrompt(req.Role)
 	}
 
 	model := req.Model
@@ -88,7 +84,7 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error)
 		}
 		msgs = append(msgs, antMessage{Role: "user", Content: user})
 	} else {
-		msgs = append(msgs, antMessage{Role: "user", Content: BuildBatchPrompt(req.Digests, req.Context)})
+		msgs = append(msgs, antMessage{Role: "user", Content: digestUserPrompt(req)})
 	}
 
 	body := antRequest{Model: model, MaxTokens: 4096, System: system, Messages: msgs}

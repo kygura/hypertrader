@@ -217,6 +217,38 @@ func TestThesis(t *testing.T) {
 	}
 }
 
+func TestTheses(t *testing.T) {
+	srv := newTestServer(t, http.MethodGet, "/api/theses", nil, http.StatusOK,
+		map[string]any{"theses": []Thesis{
+			{
+				Coin: "BTC", Direction: "long", Summary: "higher-timeframe uptrend intact",
+				Invalidation: 58200, Targets: []float64{62000, 66500}, Horizon: "weeks",
+				Confidence: 0.7,
+				CreatedAt:  time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+				ReviewedAt: time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC),
+				Version:    4,
+			},
+		}})
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	got, err := c.Theses(context.Background())
+	if err != nil {
+		t.Fatalf("Theses: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Theses() len = %d, want 1", len(got))
+	}
+	th := got[0]
+	if th.Coin != "BTC" || th.Direction != "long" || th.Invalidation != 58200 ||
+		len(th.Targets) != 2 || th.Horizon != "weeks" || th.Version != 4 {
+		t.Errorf("Theses()[0] = %+v", th)
+	}
+	if !th.ReviewedAt.Equal(time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC)) {
+		t.Errorf("ReviewedAt = %s", th.ReviewedAt)
+	}
+}
+
 func TestChat(t *testing.T) {
 	srv := newTestServer(t, http.MethodPost, "/api/chat", func(t *testing.T, buf []byte) {
 		m := decodeBody(t, buf)

@@ -468,6 +468,58 @@ func TestCacheHistoryNegativeOrZero(t *testing.T) {
 	}
 }
 
+func TestCacheThesisPutAndGet(t *testing.T) {
+	c := NewCache()
+
+	if _, ok := c.Thesis("BTC"); ok {
+		t.Error("expected no thesis for a fresh cache")
+	}
+
+	c.PutThesis(Thesis{Coin: "BTC", Direction: "long", Version: 1})
+	c.PutThesis(Thesis{Coin: "BTC", Direction: "short", Version: 2}) // replaces
+
+	got, ok := c.Thesis("BTC")
+	if !ok {
+		t.Fatal("expected BTC thesis after PutThesis")
+	}
+	if got.Direction != "short" || got.Version != 2 {
+		t.Errorf("expected replaced thesis (short, v2), got (%s, v%d)", got.Direction, got.Version)
+	}
+}
+
+func TestCacheThesesSortedByCoin(t *testing.T) {
+	c := NewCache()
+	c.PutThesis(Thesis{Coin: "SOL", Direction: "long"})
+	c.PutThesis(Thesis{Coin: "BTC", Direction: "short"})
+	c.PutThesis(Thesis{Coin: "ETH", Direction: "neutral"})
+
+	all := c.Theses()
+	if len(all) != 3 {
+		t.Fatalf("expected 3 theses, got %d", len(all))
+	}
+	if all[0].Coin != "BTC" || all[1].Coin != "ETH" || all[2].Coin != "SOL" {
+		t.Errorf("expected coin-sorted [BTC ETH SOL], got [%s %s %s]", all[0].Coin, all[1].Coin, all[2].Coin)
+	}
+}
+
+func TestCacheApplyThesesReplacesSnapshot(t *testing.T) {
+	c := NewCache()
+	c.PutThesis(Thesis{Coin: "BTC", Direction: "long"})
+	c.PutThesis(Thesis{Coin: "ETH", Direction: "short"})
+
+	// Snapshot omits ETH entirely — it must be dropped, not preserved: the
+	// snapshot is authoritative.
+	c.ApplyTheses([]Thesis{{Coin: "BTC", Direction: "neutral", Version: 5}})
+
+	got, ok := c.Thesis("BTC")
+	if !ok || got.Direction != "neutral" || got.Version != 5 {
+		t.Errorf("expected snapshot BTC thesis (neutral, v5), got %+v ok=%v", got, ok)
+	}
+	if _, ok := c.Thesis("ETH"); ok {
+		t.Error("expected ETH thesis dropped by snapshot apply")
+	}
+}
+
 func TestCacheHistoryEmptySeriesReturnsEmpty(t *testing.T) {
 	c := NewCache()
 

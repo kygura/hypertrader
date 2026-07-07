@@ -5,6 +5,7 @@
 package executor
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/hyperagent/hyperagent/internal/signing"
@@ -24,6 +25,30 @@ type OrderRequest struct {
 // exponent. HL is strict about wire numeric formatting in the action hash.
 func fmtFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// roundSize floors sz to the asset's szDecimals. Floor, not round: the wire
+// size must never exceed what the verdict's USD size authorized.
+func roundSize(sz float64, szDecimals int) float64 {
+	pow := math.Pow(10, float64(szDecimals))
+	return math.Floor(sz*pow) / pow
+}
+
+// roundPrice rounds px to HL's perp price rule: at most 5 significant figures
+// and at most 6-szDecimals decimal places; integer prices are always allowed.
+func roundPrice(px float64, szDecimals int) float64 {
+	if px <= 0 {
+		return px
+	}
+	dec := 4 - int(math.Floor(math.Log10(px))) // decimals left by 5 sig figs
+	if maxDec := 6 - szDecimals; dec > maxDec {
+		dec = maxDec
+	}
+	if dec <= 0 {
+		return math.Round(px)
+	}
+	pow := math.Pow(10, float64(dec))
+	return math.Round(px*pow) / pow
 }
 
 // buildOrderAction constructs the ordered action map for one or more orders.

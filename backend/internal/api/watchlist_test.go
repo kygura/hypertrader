@@ -93,7 +93,7 @@ func TestWatchlistTrackNilBatcherReturns503(t *testing.T) {
 }
 
 func TestWatchlistTrackAddsCoin(t *testing.T) {
-	bt := batcher.New(bus.New(), newTrackTestStore(t), nil, nil, 10)
+	bt := batcher.New(bus.New(), newTrackTestStore(t), nil, nil, nil, 10)
 	srv := newWatchlistTestServer(t, Deps{Batcher: bt})
 	resp := postJSON(t, srv, "/api/watchlist/track", map[string]any{"coin": "BTC", "timeframe": "1h"}, nil)
 	defer resp.Body.Close()
@@ -126,7 +126,7 @@ func requiresConfirmationFor(t *testing.T, b *bus.Bus, st *store.Store, bt *batc
 func TestWatchlistTrackAutonomousModeDoesNotRequireConfirmation(t *testing.T) {
 	b := bus.New()
 	st := newTrackTestStore(t)
-	bt := batcher.New(b, st, nil, nil, 10)
+	bt := batcher.New(b, st, nil, nil, nil, 10)
 	exec, _ := newFakeExchangeExecutor(t, baseRisk()) // baseRisk().Mode == "autonomous"
 	srv := newWatchlistTestServer(t, Deps{Batcher: bt, Bus: b, Store: st, Exec: exec})
 
@@ -143,7 +143,7 @@ func TestWatchlistTrackAutonomousModeDoesNotRequireConfirmation(t *testing.T) {
 func TestWatchlistTrackNilExecRequiresConfirmation(t *testing.T) {
 	b := bus.New()
 	st := newTrackTestStore(t)
-	bt := batcher.New(b, st, nil, nil, 10)
+	bt := batcher.New(b, st, nil, nil, nil, 10)
 	srv := newWatchlistTestServer(t, Deps{Batcher: bt, Bus: b, Store: st})
 
 	resp := postJSON(t, srv, "/api/watchlist/track", map[string]any{"coin": "BTC", "timeframe": "1h"}, nil)
@@ -157,7 +157,7 @@ func TestWatchlistTrackNilExecRequiresConfirmation(t *testing.T) {
 }
 
 func TestWatchlistTrackMissingCoinReturns400(t *testing.T) {
-	bt := batcher.New(bus.New(), newTrackTestStore(t), nil, nil, 10)
+	bt := batcher.New(bus.New(), newTrackTestStore(t), nil, nil, nil, 10)
 	srv := newWatchlistTestServer(t, Deps{Batcher: bt})
 	resp := postJSON(t, srv, "/api/watchlist/track", map[string]any{"timeframe": "1h"}, nil)
 	defer resp.Body.Close()
@@ -169,7 +169,7 @@ func TestWatchlistTrackMissingCoinReturns400(t *testing.T) {
 func TestWatchlistUntrackRemovesCoin(t *testing.T) {
 	b := bus.New()
 	st := newTrackTestStore(t)
-	bt := batcher.New(b, st, nil, map[string]metrics.AssetStrategy{
+	bt := batcher.New(b, st, nil, nil, map[string]metrics.AssetStrategy{
 		"BTC": {Coin: "BTC", Timeframe: "1h"},
 	}, 10)
 	srv := newWatchlistTestServer(t, Deps{Batcher: bt, Bus: b, Store: st})
@@ -187,7 +187,7 @@ func TestWatchlistUntrackRemovesCoin(t *testing.T) {
 }
 
 func TestWatchlistUntrackMissingCoinReturns400(t *testing.T) {
-	bt := batcher.New(bus.New(), newTrackTestStore(t), nil, nil, 10)
+	bt := batcher.New(bus.New(), newTrackTestStore(t), nil, nil, nil, 10)
 	srv := newWatchlistTestServer(t, Deps{Batcher: bt})
 	resp := postJSON(t, srv, "/api/watchlist/untrack", map[string]any{}, nil)
 	defer resp.Body.Close()
@@ -208,7 +208,7 @@ func TestWatchlistScanNilBatcherReturns503(t *testing.T) {
 func TestWatchlistScanPublishesDigestPerTrackedCoin(t *testing.T) {
 	b := bus.New()
 	st := newTrackTestStore(t)
-	bt := batcher.New(b, st, nil, map[string]metrics.AssetStrategy{
+	bt := batcher.New(b, st, nil, nil, map[string]metrics.AssetStrategy{
 		"BTC": {Coin: "BTC", Timeframe: "1h"},
 		"ETH": {Coin: "ETH", Timeframe: "1h"},
 	}, 10)

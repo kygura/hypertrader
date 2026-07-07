@@ -54,6 +54,7 @@ func (s *Server) handleWatchlistTrack(w http.ResponseWriter, r *http.Request) {
 		Timeframe:            req.Timeframe,
 		RequiresConfirmation: confirm,
 		MaxPositionUSD:       s.deps.Cfg.Execution.MaxPositionUSD,
+		MaxPositionPct:       s.deps.Cfg.Execution.MaxPositionPct,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

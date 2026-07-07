@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -166,7 +167,21 @@ func sortedKeys(m map[string]Provider) []string {
 	return out
 }
 
-// Engine consumes gated digests, reasons, and emits validated verdicts on the bus.
+// ThesisStore is the write side of the thesis lifecycle the engine drives on
+// review responses. Declared here (not imported from internal/thesis) because
+// the thesis package journals through internal/journal, which imports reasoner
+// for the Verdict type — a direct import would cycle. main.go wires the
+// concrete *thesis.Store.
+type ThesisStore interface {
+	Get(coin string) (metrics.Thesis, bool)
+	Upsert(t metrics.Thesis) (metrics.Thesis, error)
+	Invalidate(coin string) bool
+}
+
+// Engine consumes digests, reasons per tier, and emits validated verdicts on
+// the bus. Review digests drive thesis create/update/invalidate; trigger
+// digests produce verdicts stamped as trigger-sourced for the executor's
+// thesis gate.
 type Engine struct {
 	bus       *bus.Bus
 	registry  *Registry
@@ -176,9 +191,14 @@ type Engine struct {
 	// onVerdict, if set, is called for each emitted verdict (the executor /
 	// journal hook). Verdicts are also published on the bus regardless.
 	onVerdict func(Verdict)
+
+	// theses and onJournal are wired via AttachThesisStore. Both nil-tolerant:
+	// without them review responses are parsed but not persisted (legacy mode).
+	theses    ThesisStore
+	onJournal func(coin, kind, summary string)
 }
 
-// NewEngine builds the batch-reasoning engine reading from the gate's output.
+// NewEngine builds the reasoning engine reading digests from digestsIn.
 func NewEngine(b *bus.Bus, reg *Registry, digestsIn <-chan metrics.Digest, onVerdict func(Verdict)) *Engine {
 	return &Engine{
 		bus:       b,
@@ -186,6 +206,21 @@ func NewEngine(b *bus.Bus, reg *Registry, digestsIn <-chan metrics.Digest, onVer
 		digestsIn: digestsIn,
 		timeout:   90 * time.Second,
 		onVerdict: onVerdict,
+	}
+}
+
+// AttachThesisStore wires the thesis store the review tier mutates and the
+// journal hook used for review misses and discarded thesis JSON. Called once
+// at wiring time, before Run.
+func (e *Engine) AttachThesisStore(ts ThesisStore, onJournal func(coin, kind, summary string)) {
+	e.theses = ts
+	e.onJournal = onJournal
+}
+
+// journal records via the wired hook, best-effort.
+func (e *Engine) journal(coin, kind, summary string) {
+	if e.onJournal != nil {
+		e.onJournal(coin, kind, summary)
 	}
 }
 
@@ -202,10 +237,18 @@ func (e *Engine) Run(ctx context.Context) {
 		if len(pending) == 0 {
 			return
 		}
-		batch := pending
+		// Partition by kind: reviews and triggers use different prompts, so
+		// they can never share a completion — but same-kind digests from
+		// several assets still amortize one call.
+		groups := make(map[string][]metrics.Digest)
+		for _, d := range pending {
+			groups[d.Kind] = append(groups[d.Kind], d)
+		}
 		pending = nil
 		timerC = nil
-		go e.reason(ctx, batch)
+		for kind, batch := range groups {
+			go e.reason(ctx, kind, batch)
+		}
 	}
 
 	for {
@@ -230,27 +273,108 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-// reason runs one batch completion with a timeout and publishes the verdicts.
-func (e *Engine) reason(ctx context.Context, digests []metrics.Digest) {
+// roleFor maps a digest kind to its prompt role. Legacy kind-less digests keep
+// the original batch framing.
+func roleFor(kind string) Role {
+	switch kind {
+	case metrics.DigestReview:
+		return RoleReview
+	case metrics.DigestTrigger:
+		return RoleTrigger
+	default:
+		return RoleBatch
+	}
+}
+
+// reason runs one completion for a same-kind digest group with a timeout,
+// applies thesis operations (review tier), and publishes the verdicts. Both
+// tiers ride the batch provider binding — RoleReview/RoleTrigger select the
+// prompt, not the transport.
+func (e *Engine) reason(ctx context.Context, kind string, digests []metrics.Digest) {
 	provider, model, ok := e.registry.For(RoleBatch)
 	if !ok {
 		e.bus.PublishStatus(bus.StatusEvent{Detail: "no reasoning provider configured"})
 		return
 	}
+	role := roleFor(kind)
+
+	// Tier status: the TUI's status line shows which asset is being reasoned
+	// about and on which tier, then drops back to IDLE.
+	for _, d := range digests {
+		if role == RoleReview {
+			e.bus.PublishStatus(bus.StatusEvent{Detail: fmt.Sprintf("REVIEW %s %s", d.Coin, d.Timeframe)})
+		} else if role == RoleTrigger {
+			e.bus.PublishStatus(bus.StatusEvent{Detail: fmt.Sprintf("TRIGGER %s %s", d.Coin, d.Timeframe)})
+		}
+	}
+	defer e.bus.PublishStatus(bus.StatusEvent{Detail: "IDLE"})
+
 	cctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
-	resp, err := provider.Complete(cctx, Request{Role: RoleBatch, Digests: digests, Model: model})
+	resp, err := provider.Complete(cctx, Request{Role: role, Digests: digests, Model: model})
 	if err != nil {
 		e.bus.PublishStatus(bus.StatusEvent{Provider: provider.Name(), Detail: "reason error: " + err.Error()})
+		if role == RoleReview {
+			// A missed review leaves the existing thesis untouched; the next
+			// close or trigger retries. The miss itself is journaled.
+			for _, d := range digests {
+				e.journal(d.Coin, "error", "thesis review missed: "+err.Error())
+			}
+		}
 		return
 	}
+
+	if role == RoleReview {
+		for _, reason := range resp.Discarded {
+			e.journal(coinOf(reason), "error", "thesis review discarded: "+reason)
+		}
+		e.applyReviews(resp.Reviews)
+	}
 	for _, v := range resp.Verdicts {
-		e.bus.PublishVerdict(v)
-		if e.onVerdict != nil {
-			e.onVerdict(v)
+		v.Source = kind
+		e.emitVerdict(v)
+	}
+}
+
+// applyReviews drives the thesis lifecycle from validated review items and
+// emits any attached entry verdicts (review-sourced, so the executor's thesis
+// gate does not apply to them).
+func (e *Engine) applyReviews(reviews []ThesisReview) {
+	for _, rv := range reviews {
+		if e.theses != nil {
+			switch rv.Op {
+			case "invalidate":
+				e.theses.Invalidate(rv.Coin)
+			case "create", "update":
+				if _, err := e.theses.Upsert(rv.Thesis); err != nil {
+					e.journal(rv.Coin, "error", "thesis persist failed: "+err.Error())
+				}
+			}
+		}
+		if rv.Verdict != nil {
+			v := *rv.Verdict
+			v.Source = metrics.DigestReview
+			e.emitVerdict(v)
 		}
 	}
+}
+
+// emitVerdict publishes a verdict on the bus and forwards it to the hook.
+func (e *Engine) emitVerdict(v Verdict) {
+	e.bus.PublishVerdict(v)
+	if e.onVerdict != nil {
+		e.onVerdict(v)
+	}
+}
+
+// coinOf extracts the leading "COIN:" prefix a discard reason carries, or ""
+// when the reason isn't coin-specific.
+func coinOf(reason string) string {
+	if i := strings.IndexByte(reason, ':'); i > 0 && !strings.ContainsRune(reason[:i], ' ') {
+		return reason[:i]
+	}
+	return ""
 }
 
 // Chat runs a single interactive completion using the chat-role provider.

@@ -19,6 +19,7 @@ type Config struct {
 	Markets    Markets    `toml:"markets"`
 	Timeframe  Timeframe  `toml:"timeframe"`
 	Reasoner   Reasoner   `toml:"reasoner"`
+	Gate       Gate       `toml:"gate"`
 	Execution  Execution  `toml:"execution"`
 	Telegram   Telegram   `toml:"telegram"`
 	Providers  Providers  `toml:"providers"`
@@ -57,23 +58,43 @@ func (t Timeframe) For(coin string) string {
 	return t.Default
 }
 
-// Reasoner selects providers and models per role and the batch cadence behavior.
-// The *_model fields are optional: when blank, a role uses its provider's default
-// model. They are what make per-role model selection configurable up front; the
-// TUI's /model command and picker override them live.
+// Reasoner selects providers and models per role. The *_model fields are
+// optional: when blank, a role uses its provider's default model. They are what
+// make per-role model selection configurable up front; the TUI's /model command
+// and picker override them live.
 type Reasoner struct {
-	BatchProvider  string `toml:"batch_provider"`
-	ChatProvider   string `toml:"chat_provider"`
-	BatchModel     string `toml:"batch_model"` // optional; defaults to the provider's model
-	ChatModel      string `toml:"chat_model"`  // optional; defaults to the provider's model
-	ReadEveryBatch bool   `toml:"read_every_batch"`
+	BatchProvider string `toml:"batch_provider"`
+	ChatProvider  string `toml:"chat_provider"`
+	BatchModel    string `toml:"batch_model"` // optional; defaults to the provider's model
+	ChatModel     string `toml:"chat_model"`  // optional; defaults to the provider's model
+}
+
+// Gate configures the deterministic deviation detector that decides when a
+// low-timeframe anomaly earns an LLM call. The defaults are deliberately
+// non-permissive — a quiet tape produces zero trigger calls; only the
+// scheduled review cadence reaches the model. A zero threshold disables that
+// rule. Old config files without a [gate] section get these defaults on load
+// (unknown keys, including the removed reasoner.read_every_batch, are ignored).
+type Gate struct {
+	LTFTimeframes  []string `toml:"ltf_timeframes"`  // finalized bars the rules run on
+	ZScoreReturn   float64  `toml:"zscore_return"`   // |return z-score| vs the timeframe's history
+	FundingAbs     float64  `toml:"funding_abs"`     // |funding rate| per hour
+	OIDeltaAbs     float64  `toml:"oi_delta_abs"`    // |OI delta| fraction per bar
+	CVDZScore      float64  `toml:"cvd_zscore"`      // |per-bar CVD delta z-score| vs history
+	Cooldown       Duration `toml:"cooldown"`        // per (coin, rule) re-fire floor
+	PositionAlways bool     `toml:"position_always"` // open positions always get their HTF review
 }
 
 // Execution holds the deterministic risk gates and the propose/autonomous mode.
+// The absolute USD gates and the capital-relative pct gates compose: the
+// effective cap is the stricter of the two, so a small account is protected by
+// the pct gates while a large one is still bounded by the absolute ceilings.
 type Execution struct {
 	Mode                string   `toml:"mode"` // "propose" | "autonomous"
 	MaxPositionUSD      float64  `toml:"max_position_usd"`
 	MaxTotalExposureUSD float64  `toml:"max_total_exposure_usd"`
+	MaxPositionPct      float64  `toml:"max_position_pct"`       // fraction of account equity per position; 0 disables
+	MaxTotalExposurePct float64  `toml:"max_total_exposure_pct"` // fraction of account equity across all positions; 0 disables
 	MaxConcurrent       int      `toml:"max_concurrent"`
 	DailyLossKillUSD    float64  `toml:"daily_loss_kill_usd"`
 	MaxPriceDeviation   float64  `toml:"max_price_deviation"` // sanity gate vs live mid (fraction)
@@ -182,14 +203,24 @@ func Default() Config {
 			PerAsset: map[string]string{"BTC": "4h"},
 		},
 		Reasoner: Reasoner{
-			BatchProvider:  "deepseek",
-			ChatProvider:   "anthropic",
-			ReadEveryBatch: true,
+			BatchProvider: "deepseek",
+			ChatProvider:  "anthropic",
+		},
+		Gate: Gate{
+			LTFTimeframes:  []string{"1m", "5m", "15m"},
+			ZScoreReturn:   3.0,
+			FundingAbs:     0.0008,
+			OIDeltaAbs:     0.04,
+			CVDZScore:      3.0,
+			Cooldown:       Duration{30 * time.Minute},
+			PositionAlways: true,
 		},
 		Execution: Execution{
-			Mode:                "propose",
+			Mode:                "autonomous",
 			MaxPositionUSD:      5000,
 			MaxTotalExposureUSD: 15000,
+			MaxPositionPct:      0.10,
+			MaxTotalExposurePct: 0.50,
 			MaxConcurrent:       5,
 			DailyLossKillUSD:    1000,
 			MaxPriceDeviation:   0.02,
@@ -285,6 +316,12 @@ func (c Config) validate() error {
 	}
 	if c.Execution.Mode != "propose" && c.Execution.Mode != "autonomous" {
 		return fmt.Errorf("config: execution.mode must be propose|autonomous, got %q", c.Execution.Mode)
+	}
+	if p := c.Execution.MaxPositionPct; p < 0 || p > 1 {
+		return fmt.Errorf("config: execution.max_position_pct must be in [0,1], got %v", p)
+	}
+	if p := c.Execution.MaxTotalExposurePct; p < 0 || p > 1 {
+		return fmt.Errorf("config: execution.max_total_exposure_pct must be in [0,1], got %v", p)
 	}
 	if c.API.Enabled && c.API.Token == "" && !isLoopbackAddr(c.API.Addr) {
 		return fmt.Errorf("api: refusing to bind non-loopback %s without [api] token", c.API.Addr)

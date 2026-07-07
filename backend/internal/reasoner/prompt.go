@@ -92,39 +92,13 @@ func formatDigest(d metrics.Digest) string {
 			CVD:   round(b.CVD, 2),
 		})
 	}
-	c := d.Current
-
-	// Interpreted signals: the normalized, ranked read of the raw metrics. Handing
-	// the model interpretation — not just numbers — is the whole point of the layer.
-	sigs := signal.Compute(signal.Inputs{Cur: d.Current, History: d.History})
-	type sigOut struct {
-		Key      string  `json:"key"`
-		Label    string  `json:"label"`
-		Score    float64 `json:"score"`
-		Strength float64 `json:"strength"`
-		Read     string  `json:"read"`
-	}
-	sigList := make([]sigOut, 0, len(sigs))
-	for _, s := range sigs {
-		sigList = append(sigList, sigOut{s.Key, s.Label, round(s.Score, 2), round(s.Strength, 2), s.Read})
-	}
-
 	payload := map[string]any{
 		"asset":     d.Coin,
 		"timeframe": d.Timeframe,
 		"at":        d.At.Format(time.RFC3339),
-		"signals":   sigList,
-		"current": map[string]any{
-			"close": round(c.Close, 6), "return": round(c.Return, 5),
-			"realized_vol": round(c.RealizedVol, 5), "range_pos": round(c.RangePos, 3),
-			"funding": round(c.Funding, 6), "funding_delta": round(c.FundingDelta, 6),
-			"oi": round(c.OpenInterest, 2), "oi_delta": round(c.OIDelta, 4),
-			"basis": round(c.Basis, 5), "cvd": round(c.CVD, 2),
-			"trade_imbalance": round(c.TradeImbal, 3), "liq_proximity": round(c.LiqProx, 3),
-			"btc_corr": round(c.BTCCorr, 3), "rel_strength": round(c.RelStrength, 5),
-			"mark": round(c.MarkPrice, 6),
-		},
-		"history": hist,
+		"signals":   signalPayload(d),
+		"current":   currentPayload(d.Current),
+		"history":   hist,
 		"position": map[string]any{
 			"size": d.Position.Size, "entry": d.Position.EntryPrice,
 			"unreal_pnl": round(d.Position.UnrealPnl, 2),
@@ -137,6 +111,37 @@ func formatDigest(d metrics.Digest) string {
 	}
 	j, _ := json.Marshal(payload)
 	return string(j)
+}
+
+// currentPayload renders the current bar's metric block, shared by every
+// digest-carrying prompt (batch, review, trigger).
+func currentPayload(c metrics.Bar) map[string]any {
+	return map[string]any{
+		"close": round(c.Close, 6), "return": round(c.Return, 5),
+		"realized_vol": round(c.RealizedVol, 5), "range_pos": round(c.RangePos, 3),
+		"funding": round(c.Funding, 6), "funding_delta": round(c.FundingDelta, 6),
+		"oi": round(c.OpenInterest, 2), "oi_delta": round(c.OIDelta, 4),
+		"basis": round(c.Basis, 5), "cvd": round(c.CVD, 2),
+		"trade_imbalance": round(c.TradeImbal, 3), "liq_proximity": round(c.LiqProx, 3),
+		"btc_corr": round(c.BTCCorr, 3), "rel_strength": round(c.RelStrength, 5),
+		"mark": round(c.MarkPrice, 6),
+	}
+}
+
+// signalPayload computes and renders the interpreted-signal layer for a
+// digest. Handing the model interpretation — not just numbers — is the whole
+// point of the layer.
+func signalPayload(d metrics.Digest) []map[string]any {
+	sigs := signal.Compute(signal.Inputs{Cur: d.Current, History: d.History})
+	out := make([]map[string]any, 0, len(sigs))
+	for _, s := range sigs {
+		out = append(out, map[string]any{
+			"key": s.Key, "label": s.Label,
+			"score": round(s.Score, 2), "strength": round(s.Strength, 2),
+			"read": s.Read,
+		})
+	}
+	return out
 }
 
 func round(f float64, places int) float64 {

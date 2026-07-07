@@ -44,6 +44,7 @@ type restState struct {
 	mu       sync.Mutex
 	posAt    time.Time
 	pos      []metrics.Position
+	acct     float64 // venue equity from the same snapshot as pos
 	ctxAt    time.Time
 	ctxs     map[string]metrics.AssetCtx
 	cacheTTL time.Duration
@@ -68,8 +69,30 @@ func (r *restState) Positions() []metrics.Position {
 	if err != nil {
 		return r.pos // stale beats blind
 	}
-	r.pos, r.posAt = st.Positions, time.Now()
+	r.pos, r.acct, r.posAt = st.Positions, st.AccountValue, time.Now()
 	return r.pos
+}
+
+// AccountValue reports venue equity through the same cached snapshot the
+// position view uses; 0 without an address, so the capital-relative gates
+// fail closed rather than sizing blind.
+func (r *restState) AccountValue() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.address == "" {
+		return 0
+	}
+	if time.Since(r.posAt) < r.cacheTTL {
+		return r.acct
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	st, err := r.rest.ClearinghouseState(ctx, r.address)
+	if err != nil {
+		return r.acct // stale beats blind
+	}
+	r.pos, r.acct, r.posAt = st.Positions, st.AccountValue, time.Now()
+	return r.acct
 }
 
 func (r *restState) AssetCtx(coin string) (metrics.AssetCtx, bool) {
@@ -138,6 +161,8 @@ func runMCP(args []string) error {
 		Mode:                "autonomous", // MCP tool calls are explicit commands; gates still apply
 		MaxPositionUSD:      cfg.Execution.MaxPositionUSD,
 		MaxTotalExposureUSD: cfg.Execution.MaxTotalExposureUSD,
+		MaxPositionPct:      cfg.Execution.MaxPositionPct,
+		MaxTotalExposurePct: cfg.Execution.MaxTotalExposurePct,
 		MaxConcurrent:       cfg.Execution.MaxConcurrent,
 		DailyLossKillUSD:    cfg.Execution.DailyLossKillUSD,
 		MaxPriceDeviation:   cfg.Execution.MaxPriceDeviation,

@@ -20,6 +20,7 @@ import (
 	"github.com/hyperagent/hyperagent/internal/metrics"
 	"github.com/hyperagent/hyperagent/internal/reasoner"
 	"github.com/hyperagent/hyperagent/internal/store"
+	"github.com/hyperagent/hyperagent/internal/thesis"
 )
 
 // Deps are the components the API surfaces — the same ones the TUI model
@@ -36,6 +37,10 @@ type Deps struct {
 	Version  string
 
 	RestClient *hlclient.Client // nil → thesis passthrough endpoint returns 503
+
+	// Theses is the live thesis store backing GET /api/theses; nil serves an
+	// empty snapshot (a daemon wired without the thesis pipeline, or tests).
+	Theses *thesis.Store
 
 	// SaveConfig persists a mutation to config.toml under the caller's own
 	// guard (mutex + atomic write); nil disables persistence (settings still
@@ -141,6 +146,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/execution/mode", s.handlePutMode)
 	s.mux.HandleFunc("PUT /api/providers/{name}/key", s.handlePutProviderKey)
 	s.mux.HandleFunc("GET /api/thesis/{coin}", s.handleThesis)
+	s.mux.HandleFunc("GET /api/theses", s.handleTheses)
 }
 
 // runCaches is the single owner of serverState: it subscribes once per topic
@@ -156,6 +162,7 @@ func (s *Server) runCaches() {
 	barsCh := s.deps.Bus.SubscribeBars(32)
 	journalCh := s.deps.Bus.SubscribeJournal(32)
 	midsCh := s.deps.Bus.SubscribeMids(32)
+	thesesCh := s.deps.Bus.SubscribeTheses(16)
 	for {
 		select {
 		case ev, ok := <-statusCh:
@@ -207,6 +214,14 @@ func (s *Server) runCaches() {
 				return
 			}
 			s.broadcast("mids", mids)
+		case t, ok := <-thesesCh:
+			if !ok {
+				return
+			}
+			// An empty Direction (Version-0 tombstone) tells clients the
+			// coin's thesis was invalidated; the snapshot endpoint stays the
+			// authority on reconnect.
+			s.broadcast("thesis", t)
 		}
 	}
 }

@@ -38,6 +38,7 @@ import (
 	"github.com/hyperagent/hyperagent/internal/signing"
 	"github.com/hyperagent/hyperagent/internal/store"
 	"github.com/hyperagent/hyperagent/internal/telegram"
+	"github.com/hyperagent/hyperagent/internal/thesis"
 )
 
 // version is the daemon build identifier reported by /api/health and the MCP
@@ -67,6 +68,7 @@ func main() {
 		configPath = flag.String("config", "config.toml", "path to config.toml")
 		testnet    = flag.Bool("testnet", false, "use Hyperliquid testnet endpoints")
 		agentKey   = flag.String("agent-key", os.Getenv("HL_AGENT_KEY"), "agent wallet private key (autonomous execution)")
+		address    = flag.String("address", os.Getenv("HL_MASTER_ADDRESS"), "master account address (equity + position visibility for risk gates)")
 	)
 	flag.Parse()
 
@@ -75,7 +77,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	if err := run(cfg, *configPath, *testnet, *agentKey); err != nil {
+	if err := run(cfg, *configPath, *testnet, *agentKey, *address); err != nil {
 		log.Fatalf("hyperagent: %v", err)
 	}
 }
@@ -107,7 +109,7 @@ func loadDotEnv(path string) {
 	}
 }
 
-func run(cfg config.Config, configPath string, testnet bool, agentKey string) error {
+func run(cfg config.Config, configPath string, testnet bool, agentKey, address string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -135,6 +137,15 @@ func run(cfg config.Config, configPath string, testnet bool, agentKey string) er
 		return err
 	}
 	rest := hlclient.New(apiURL)
+
+	// Account poller: venue-truth equity + open positions into the store, so
+	// the capital-relative risk gates size against live capital. Without an
+	// address those gates fail closed — new exposure is refused, not unguarded.
+	if address != "" {
+		go pollAccount(ctx, rest, st, address)
+	} else if cfg.Execution.MaxPositionPct > 0 || cfg.Execution.MaxTotalExposurePct > 0 {
+		log.Printf("no master address (-address / HL_MASTER_ADDRESS): capital-relative gates will refuse new exposure")
+	}
 
 	// Build the per-coin timeframe sets the aggregator folds.
 	tfByCoin := buildTimeframes(cfg)
@@ -165,14 +176,36 @@ func run(cfg config.Config, configPath string, testnet bool, agentKey string) er
 		}
 	}
 
-	// --- Gate + batcher + reasoning engine ---
-	g := gate.New(b, gate.DefaultRules())
+	// --- Thesis store + gate + batcher + reasoning engine ---
+	// The thesis store is the persistent directional memory: reviews mutate
+	// it, the gate watches its invalidation levels, digests carry it, and the
+	// executor's thesis gate reads it.
+	ts, err := thesis.NewStore(b, jr, cfg.Storage.Dir)
+	if err != nil {
+		return err
+	}
 	strategies := buildStrategies(cfg)
-	bt := batcher.New(b, st, jr, strategies, cfg.Storage.HistoryBars)
-	engine := reasoner.NewEngine(b, reg, g.Out(), onVerdict)
+	bt := batcher.New(b, st, jr, ts, strategies, cfg.Storage.HistoryBars)
+	// The gate runs deterministic deviation rules on LTF closes and hands
+	// fires to the batcher, which builds the trigger (or forced-review)
+	// digest. The engine consumes all digests straight off the bus — review
+	// digests are cadence-authorized, trigger digests gate-authorized.
+	g := gate.New(b, buildGateRules(cfg), st, ts, bt.Trigger)
+	engine := reasoner.NewEngine(b, reg, b.SubscribeDigests(256), onVerdict)
+	engine.AttachThesisStore(ts, func(coin, kind, summary string) {
+		_ = jr.Record(journal.Entry{Coin: coin, Kind: kind, Summary: summary})
+	})
+	if exec != nil {
+		exec.SetTheses(ts)
+	}
 
 	// --- Ingestor ---
 	in := ingestor.New(wsURL, cfg.Markets.Visualized, b)
+	if universe, err := rest.Universe(ctx); err != nil {
+		log.Printf("ingestor: could not fetch perp universe, per-coin WS filtering disabled: %v", err)
+	} else {
+		in.SetUniverse(universe)
+	}
 
 	// --- Telegram (optional) ---
 	// Approve/reject route through the executor's shared proposal registry —
@@ -208,6 +241,7 @@ func run(cfg config.Config, configPath string, testnet bool, agentKey string) er
 			Ingestor:   in,
 			Batcher:    bt,
 			RestClient: rest,
+			Theses:     ts,
 			Cfg:        cfg,
 			Version:    version,
 			CfgSnapshot: func() config.Config {
@@ -253,10 +287,24 @@ func run(cfg config.Config, configPath string, testnet bool, agentKey string) er
 	return nil
 }
 
+// buildGateRules maps the [gate] config section onto the gate's rule set.
+func buildGateRules(cfg config.Config) gate.Rules {
+	return gate.Rules{
+		LTFTimeframes:  cfg.Gate.LTFTimeframes,
+		ZScoreReturn:   cfg.Gate.ZScoreReturn,
+		FundingAbs:     cfg.Gate.FundingAbs,
+		OIDeltaAbs:     cfg.Gate.OIDeltaAbs,
+		CVDZScore:      cfg.Gate.CVDZScore,
+		Cooldown:       cfg.Gate.Cooldown.Duration,
+		PositionAlways: cfg.Gate.PositionAlways,
+	}
+}
+
 // buildTimeframes returns, per visualized coin, the timeframes the aggregator
-// should fold: always the display set plus the tracked decision timeframe.
+// should fold: the LTF rungs the deviation gate watches, the display/HTF
+// ladder the thesis review reads, plus the asset's review timeframe.
 func buildTimeframes(cfg config.Config) map[string][]aggregator.Timeframe {
-	displaySet := []string{"15m", "1h", "4h", "1d"}
+	displaySet := []string{"1m", "5m", "15m", "1h", "4h", "1d", "1w"}
 	out := make(map[string][]aggregator.Timeframe)
 	for _, coin := range cfg.Markets.Visualized {
 		seen := map[string]bool{}
@@ -289,6 +337,7 @@ func buildStrategies(cfg config.Config) map[string]metrics.AssetStrategy {
 			Timeframe:            cfg.Timeframe.For(coin),
 			RequiresConfirmation: confirm,
 			MaxPositionUSD:       cfg.Execution.MaxPositionUSD,
+			MaxPositionPct:       cfg.Execution.MaxPositionPct,
 		}
 	}
 	return out
@@ -383,6 +432,8 @@ func buildExecutor(ctx context.Context, cfg config.Config, b *bus.Bus, st *store
 		Mode:                cfg.Execution.Mode,
 		MaxPositionUSD:      cfg.Execution.MaxPositionUSD,
 		MaxTotalExposureUSD: cfg.Execution.MaxTotalExposureUSD,
+		MaxPositionPct:      cfg.Execution.MaxPositionPct,
+		MaxTotalExposurePct: cfg.Execution.MaxTotalExposurePct,
 		MaxConcurrent:       cfg.Execution.MaxConcurrent,
 		DailyLossKillUSD:    cfg.Execution.DailyLossKillUSD,
 		MaxPriceDeviation:   cfg.Execution.MaxPriceDeviation,
@@ -411,6 +462,34 @@ func buildExecutor(ctx context.Context, cfg config.Config, b *bus.Bus, st *store
 	return executor.New(risk, b, st, jr, signer, assetIdx, apiURL, !testnet)
 }
 
+// pollAccount keeps the store's account snapshot (equity + open positions)
+// synced with the venue. 15s cadence: fast enough that the capital-relative
+// gates track equity through fills, slow enough to stay far from rate limits.
+func pollAccount(ctx context.Context, rest *hlclient.Client, st *store.Store, address string) {
+	tick := time.NewTicker(15 * time.Second)
+	defer tick.Stop()
+	logged := false
+	for {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		acct, err := rest.ClearinghouseState(cctx, address)
+		cancel()
+		if err != nil {
+			log.Printf("account poll %s: %v", address, err)
+		} else {
+			st.SetAccount(acct.AccountValue, acct.Positions)
+			if !logged {
+				log.Printf("account %s: equity %.2f USD, %d open position(s)", address, acct.AccountValue, len(acct.Positions))
+				logged = true
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
 // buildAssetIndex resolves tracked coins to HL perp asset ids via meta. The
 // asset id is the coin's POSITION in the meta universe array — never derived
 // from map iteration. Best effort; coins not found simply can't be auto-executed.
@@ -418,7 +497,7 @@ func buildAssetIndex(ctx context.Context, rest *hlclient.Client, tracked []strin
 	idx := executor.AssetIndex{}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	universe, err := rest.Universe(cctx)
+	universe, err := rest.UniverseMeta(cctx)
 	if err != nil {
 		return idx
 	}
@@ -426,9 +505,9 @@ func buildAssetIndex(ctx context.Context, rest *hlclient.Client, tracked []strin
 	for _, t := range tracked {
 		want[t] = true
 	}
-	for i, coin := range universe {
-		if want[coin] {
-			idx[coin] = i
+	for i, a := range universe {
+		if want[a.Name] {
+			idx[a.Name] = executor.AssetInfo{ID: i, SzDecimals: a.SzDecimals}
 		}
 	}
 	return idx
@@ -444,7 +523,11 @@ func warmUp(ctx context.Context, cfg config.Config, rest *hlclient.Client, md *m
 	want := cfg.Storage.HistoryBars
 	for _, coin := range cfg.Markets.Visualized {
 		seen := map[string]bool{}
-		for _, tf := range []string{cfg.Timeframe.For(coin), "1h"} {
+		// The review ladder's HTF rungs (4h/1d/1w) warm alongside the decision
+		// timeframe and 1h so review digests are rich from first boot. The LTF
+		// gate rungs (1m/5m/15m) are deliberately not backfilled: their z-score
+		// rules self-disable below a minimum live sample anyway.
+		for _, tf := range []string{cfg.Timeframe.For(coin), "1h", "4h", "1d", "1w"} {
 			if seen[tf] {
 				continue
 			}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/hyperagent/hyperagent/internal/hlclient"
+	"github.com/hyperagent/hyperagent/internal/metrics"
+	"github.com/hyperagent/hyperagent/internal/thesis"
 )
 
 // newHLFixture stands up a fake Hyperliquid /info endpoint that answers
@@ -192,5 +195,68 @@ func TestThesisDefaultTimeframeFromConfig(t *testing.T) {
 	}
 	if seen["1h"] || seen["15m"] {
 		t.Fatalf("intervals requested = %v, want NOT to include 1h/15m (global default shadowed by BTC override)", seen)
+	}
+}
+
+// TestThesesSnapshot verifies GET /api/theses: the {"theses":[...]} envelope
+// with the spec's field names, empty (not null) without a store, and the full
+// live set — invalidated coins absent — when one is wired. Clients treat this
+// snapshot as authoritative on (re)connect.
+func TestThesesSnapshot(t *testing.T) {
+	// No store wired: empty array, still the envelope.
+	srv := httptest.NewServer(NewServer(testDeps(t, nil)).Handler())
+	defer srv.Close()
+	resp, err := srv.Client().Get(srv.URL + "/api/theses")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(raw), `"theses":[]`) {
+		t.Fatalf("empty snapshot = %s, want {\"theses\":[]}", raw)
+	}
+
+	// Live store: created theses appear, invalidated ones drop out.
+	ts, err := thesis.NewStore(nil, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ts.Upsert(metrics.Thesis{Coin: "BTC", Direction: "long", Summary: "hl", Invalidation: 92000, Confidence: 0.7, Horizon: "weeks"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ts.Upsert(metrics.Thesis{Coin: "ETH", Direction: "short", Confidence: 0.5}); err != nil {
+		t.Fatal(err)
+	}
+	ts.Invalidate("ETH")
+
+	deps := testDeps(t, nil)
+	deps.Theses = ts
+	srv2 := httptest.NewServer(NewServer(deps).Handler())
+	defer srv2.Close()
+	resp2, err := srv2.Client().Get(srv2.URL + "/api/theses")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	var body struct {
+		Theses []map[string]any `json:"theses"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Theses) != 1 {
+		t.Fatalf("theses = %+v, want only live BTC", body.Theses)
+	}
+	got := body.Theses[0]
+	for _, field := range []string{"coin", "direction", "summary", "invalidation", "targets", "horizon", "confidence", "created_at", "reviewed_at", "version"} {
+		if _, ok := got[field]; !ok {
+			t.Errorf("snapshot missing wire field %q: %v", field, got)
+		}
+	}
+	if got["coin"] != "BTC" || got["direction"] != "long" || got["version"] != float64(1) {
+		t.Fatalf("thesis content wrong: %v", got)
 	}
 }

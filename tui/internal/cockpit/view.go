@@ -41,7 +41,12 @@ func (m *Model) View() tea.View {
 		m.mandateView(leftColW, topRowH),
 		m.marketsView(rightColW, topRowH),
 	)
-	rightBot := m.journalView(rightColW, botRowH)
+	// Right column below MARKET PICTURE: thesis cards (state, replaced in
+	// place) stacked over the decision journal (chronological events). Chat,
+	// when open, takes the whole region — same footprint it had before the
+	// THESES panel existed.
+	thesesH := (botRowH + 1) / 2
+	rightBot := m.thesesView(rightColW, thesesH) + "\n" + m.journalView(rightColW, botRowH-thesesH)
 	if m.chatOpen {
 		rightBot = m.chatView(rightColW, botRowH)
 	}

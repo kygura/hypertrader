@@ -1,25 +1,30 @@
 package apiclient
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 // Cache is a client-side mirror of backend/internal/store.Store's read
 // surface: same method names/signatures, fed over HTTP+WS instead of
 // in-process. Model's render code calls these exactly as it called
 // store.Store directly when the TUI shared a process with the daemon.
 type Cache struct {
-	mu    sync.RWMutex
-	bars  map[string]map[string][]Bar // coin -> tf -> bars, oldest-first
-	mids  map[string]float64
-	ctxs  map[string]AssetCtx
-	pos   map[string]Position
+	mu     sync.RWMutex
+	bars   map[string]map[string][]Bar // coin -> tf -> bars, oldest-first
+	mids   map[string]float64
+	ctxs   map[string]AssetCtx
+	pos    map[string]Position
+	theses map[string]Thesis
 }
 
 func NewCache() *Cache {
 	return &Cache{
-		bars: make(map[string]map[string][]Bar),
-		mids: make(map[string]float64),
-		ctxs: make(map[string]AssetCtx),
-		pos:  make(map[string]Position),
+		bars:   make(map[string]map[string][]Bar),
+		mids:   make(map[string]float64),
+		ctxs:   make(map[string]AssetCtx),
+		pos:    make(map[string]Position),
+		theses: make(map[string]Thesis),
 	}
 }
 
@@ -60,6 +65,46 @@ func (c *Cache) Position(coin string) Position {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.pos[coin]
+}
+
+// Thesis returns coin's latest cached thesis, if one has been seen.
+func (c *Cache) Thesis(coin string) (Thesis, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	t, ok := c.theses[coin]
+	return t, ok
+}
+
+// Theses returns every cached thesis, sorted by coin — the read surface the
+// cockpit's per-asset cards render from (mirrors Position()).
+func (c *Cache) Theses() []Thesis {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]Thesis, 0, len(c.theses))
+	for _, t := range c.theses {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Coin < out[j].Coin })
+	return out
+}
+
+// PutThesis stores/replaces coin's thesis — the WS "thesis" event path.
+func (c *Cache) PutThesis(t Thesis) {
+	c.mu.Lock()
+	c.theses[t.Coin] = t
+	c.mu.Unlock()
+}
+
+// ApplyTheses replaces the whole thesis set from a GET /api/theses snapshot —
+// the on-connect cold-start path. The snapshot is authoritative: theses the
+// daemon no longer holds are dropped.
+func (c *Cache) ApplyTheses(ts []Thesis) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.theses = make(map[string]Thesis, len(ts))
+	for _, t := range ts {
+		c.theses[t.Coin] = t
+	}
 }
 
 // PutBar appends/replaces a bar in its (coin, tf) series, keyed by CloseTime —

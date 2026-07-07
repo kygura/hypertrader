@@ -30,6 +30,11 @@ type (
 	barMsg     apiclient.Bar
 	verdictMsg apiclient.Verdict
 
+	// thesisMsg signals a thesis change already applied to the cache by the
+	// bridge (WS "thesis" frame, or a zero value after an on-connect
+	// snapshot) — the render loop repaints the THESES cards from the cache.
+	thesisMsg apiclient.Thesis
+
 	// journalMsg mirrors backend/internal/bus.JournalEvent.
 	journalMsg struct {
 		Coin    string

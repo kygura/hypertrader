@@ -48,7 +48,7 @@ func main() {
 	})
 
 	p := tea.NewProgram(model, tea.WithContext(ctx))
-	go cockpit.PumpWS(ctx, *coreURL, cache, p)
+	go cockpit.PumpWS(ctx, *coreURL, client, cache, p)
 	go cockpit.PollMarkets(ctx, client, cache, p)
 
 	if _, err := p.Run(); err != nil {

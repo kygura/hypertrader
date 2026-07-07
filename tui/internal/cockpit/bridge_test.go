@@ -117,7 +117,7 @@ func TestPumpWSForwardsBarAndStatusFrames(t *testing.T) {
 	}()
 	defer p.Kill()
 
-	go PumpWS(ctx, srv.URL, cache, p)
+	go PumpWS(ctx, srv.URL, nil, cache, p)
 
 	var gotBar, gotForwardedStatus, gotConnTrue, gotConnFalse bool
 	deadline := time.After(4 * time.Second)
@@ -152,6 +152,63 @@ func TestPumpWSForwardsBarAndStatusFrames(t *testing.T) {
 	})
 }
 
+// TestPumpWSForwardsThesisFramesAndSeedsSnapshot stands up a server that
+// answers GET /api/theses with a one-thesis snapshot and pushes a "thesis"
+// WS frame, then asserts PumpWS both seeds the cache from the snapshot on
+// connect (client non-nil) and applies + forwards the pushed frame as a
+// thesisMsg.
+func TestPumpWSForwardsThesisFramesAndSeedsSnapshot(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/theses" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"theses":[{"coin":"BTC","direction":"long","version":2}]}`))
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		th := apiclient.Thesis{Coin: "ETH", Direction: "short", Summary: "distribution", Version: 1}
+		data, _ := json.Marshal(th)
+		_ = conn.WriteMessage(websocket.TextMessage, mustMarshalFrame(t, "thesis", data))
+		time.Sleep(200 * time.Millisecond)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := apiclient.New(srv.URL, "")
+	cache := apiclient.NewCache()
+	p, msgs := newTestProgram(ctx)
+	go func() { _, _ = p.Run() }()
+	defer p.Kill()
+
+	go PumpWS(ctx, srv.URL, client, cache, p)
+
+	var gotFrame bool
+	deadline := time.After(4 * time.Second)
+	for !gotFrame {
+		select {
+		case msg := <-msgs:
+			if tm, ok := msg.(thesisMsg); ok && tm.Coin == "ETH" {
+				gotFrame = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the pushed thesis frame")
+		}
+	}
+
+	waitForCondition(t, time.Second, func() bool {
+		eth, okETH := cache.Thesis("ETH")
+		btc, okBTC := cache.Thesis("BTC")
+		return okETH && eth.Direction == "short" && okBTC && btc.Version == 2
+	})
+}
+
 // TestPumpWSReconnectsOnImmediateClose points PumpWS at a server that accepts
 // the WS upgrade and immediately closes the connection, then asserts a
 // second connection attempt eventually happens (observed via a counter
@@ -183,7 +240,7 @@ func TestPumpWSReconnectsOnImmediateClose(t *testing.T) {
 	go func() { _, _ = p.Run() }()
 	defer p.Kill()
 
-	go PumpWS(ctx, srv.URL, cache, p)
+	go PumpWS(ctx, srv.URL, nil, cache, p)
 
 	waitForCondition(t, 5*time.Second, func() bool {
 		mu.Lock()
@@ -240,7 +297,7 @@ func TestPumpWSBacksOffAfterQuickDrop(t *testing.T) {
 	go func() { _, _ = p.Run() }()
 	defer p.Kill()
 
-	go PumpWS(ctx, srv.URL, cache, p)
+	go PumpWS(ctx, srv.URL, nil, cache, p)
 
 	var t1, t2 time.Time
 	select {

@@ -1,6 +1,6 @@
-# Hypertrader
+# Hyperion
 
-![Hypertrader TUI](pitch/media/hypertrader-tui.gif)
+![Hyperion TUI](pitch/media/hypertrader-tui.gif)
 
 Autonomous trading operator on Hyperliquid. Agents state a mandate in plain language — "reach 60/40 ETH–stablecoin, 90 days, max 8% drawdown" — and the system watches, reasons, and executes. Backend daemon ingests markets, runs reasoning loops via LLM agents, executes through hard-coded risk gates. Every decision journaled and inspectable.
 

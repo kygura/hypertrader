@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/hyperagent/hyperagent/internal/metrics"
 	"github.com/hyperagent/hyperagent/internal/thesis"
 )
 
@@ -26,4 +27,16 @@ func (s *Server) handleThesis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"context": ctx})
+}
+
+// handleTheses serves the live thesis snapshot for pane cold-start. Clients
+// treat it as authoritative on (re)connect — a coin absent here has no live
+// thesis (never reviewed, or invalidated) — so it always lists every live
+// thesis and nothing else. No store wired serves the same shape, empty.
+func (s *Server) handleTheses(w http.ResponseWriter, r *http.Request) {
+	theses := []metrics.Thesis{}
+	if s.deps.Theses != nil {
+		theses = s.deps.Theses.All()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"theses": theses})
 }

@@ -87,7 +87,7 @@ func newFakeExchangeExecutor(t *testing.T, cfg executor.RiskConfig) (*executor.E
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := executor.New(cfg, b, st, jr, signer, executor.AssetIndex{"ETH": 1}, xsrv.URL, false)
+	e := executor.New(cfg, b, st, jr, signer, executor.AssetIndex{"ETH": {ID: 1, SzDecimals: 4}}, xsrv.URL, false)
 	return e, &calls
 }
 

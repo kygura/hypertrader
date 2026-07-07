@@ -30,14 +30,18 @@ const (
 	ActionAlertOnly = metrics.ActionAlertOnly
 )
 
-// Role identifies which configured provider to use: routine batch reasoning vs
-// interactive chat / escalations. The plan splits these so a cheap model can do
-// batches while a stronger one handles chat.
+// Role identifies which configured provider to use and which prompt frames the
+// request: routine batch reasoning vs interactive chat / escalations. The plan
+// splits these so a cheap model can do batches while a stronger one handles
+// chat. RoleReview and RoleTrigger are the two thesis-pipeline tiers; both run
+// on the batch provider binding — they are prompts, not separate transports.
 type Role string
 
 const (
-	RoleBatch Role = "batch"
-	RoleChat  Role = "chat"
+	RoleBatch   Role = "batch"
+	RoleChat    Role = "chat"
+	RoleReview  Role = "review"  // thesis review on a review-timeframe close
+	RoleTrigger Role = "trigger" // gate-fired deviation check
 )
 
 // Request is the input to a provider completion. For batch reasoning it carries
@@ -70,12 +74,19 @@ type ChatTurn struct {
 	Text string
 }
 
-// Response is what a provider returns. For batch requests Verdicts is populated;
-// for chat requests Reply holds the assistant's text (and Verdicts may be empty).
+// Response is what a provider returns. For batch/trigger requests Verdicts is
+// populated; for review requests Reviews carries the thesis operations (with
+// any attached entry verdicts); for chat requests Reply holds the assistant's
+// text (and the other fields may be empty).
 type Response struct {
 	Verdicts []Verdict
-	Reply    string
-	Model    string
+	Reviews  []ThesisReview
+	// Discarded lists review elements dropped during validation, one line
+	// each, for the engine to journal — a malformed thesis is discarded and
+	// journaled; the prior version stays.
+	Discarded []string
+	Reply     string
+	Model     string
 }
 
 // Provider is the single abstraction over every LLM backend.

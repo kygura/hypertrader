@@ -33,6 +33,7 @@ type Model struct {
 	chatFn   ChatFunc
 
 	visualized []string
+	tracked    []string          // assets the agent reasons over (THESES cards)
 	timeframes map[string]string // coin -> display timeframe (default 1h)
 	risk       apiclient.RiskSettings
 
@@ -42,6 +43,12 @@ type Model struct {
 	startedAt time.Time
 
 	journal []journalEntry
+
+	// Thesis-card display state. flashes holds per-coin trigger flashes;
+	// displayClearedAt hides reasoning text older than the operator's last
+	// /clear — a thesis reviewed after it shows its summary again.
+	flashes          map[string]cardFlash
+	displayClearedAt time.Time
 
 	// Chat: bottom input bar; when open, the reply pane replaces the
 	// DECISION JOURNAL panel.
@@ -74,7 +81,9 @@ func New(cfg Config) *Model {
 		controls:   cfg.Controls,
 		chatFn:     cfg.ChatFn,
 		visualized: cfg.Settings.Visualized,
+		tracked:    cfg.Settings.Tracked,
 		timeframes: tf,
+		flashes:    make(map[string]cardFlash),
 		risk:       cfg.Settings.Risk,
 		mode:       cfg.Settings.Mode,
 		phase:      "INGEST",

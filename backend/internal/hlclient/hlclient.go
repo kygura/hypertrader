@@ -127,7 +127,8 @@ type assetCtxWire struct {
 
 type metaUniverse struct {
 	Universe []struct {
-		Name string `json:"name"`
+		Name       string `json:"name"`
+		SzDecimals int    `json:"szDecimals"`
 	} `json:"universe"`
 }
 
@@ -185,6 +186,29 @@ func (c *Client) Universe(ctx context.Context) ([]string, error) {
 		names[i] = u.Name
 	}
 	return names, nil
+}
+
+// AssetMeta is one perp universe entry: the coin name plus the venue's size
+// precision. The index of an entry in the returned slice IS its HL asset id.
+type AssetMeta struct {
+	Name       string
+	SzDecimals int
+}
+
+// UniverseMeta returns the perp universe with per-asset size precision, in meta
+// order. Order construction needs szDecimals: the exchange rejects size/price
+// strings carrying more precision than the asset allows.
+func (c *Client) UniverseMeta(ctx context.Context) ([]AssetMeta, error) {
+	body := map[string]any{"type": "meta"}
+	var meta metaUniverse
+	if err := c.info(ctx, body, &meta); err != nil {
+		return nil, err
+	}
+	out := make([]AssetMeta, len(meta.Universe))
+	for i, u := range meta.Universe {
+		out[i] = AssetMeta{Name: u.Name, SzDecimals: u.SzDecimals}
+	}
+	return out, nil
 }
 
 // AllMids returns the current mid price for every coin.

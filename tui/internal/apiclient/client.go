@@ -108,6 +108,16 @@ func (c *Client) Thesis(ctx context.Context, coin, tf string) (string, error) {
 	return out.Context, err
 }
 
+// Theses fetches the full thesis snapshot from GET /api/theses — the
+// cockpit's cold-start for the per-asset thesis cards.
+func (c *Client) Theses(ctx context.Context) ([]Thesis, error) {
+	var out struct {
+		Theses []Thesis `json:"theses"`
+	}
+	err := c.do(ctx, http.MethodGet, "/api/theses", nil, &out)
+	return out.Theses, err
+}
+
 func (c *Client) Chat(ctx context.Context, message string, history []ChatTurn) (reply, provider, model string, err error) {
 	var out struct {
 		Reply    string `json:"reply"`

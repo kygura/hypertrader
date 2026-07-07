@@ -151,6 +151,43 @@ func (p Position) IsLong() bool  { return p.Size > 0 }
 func (p Position) IsShort() bool { return p.Size < 0 }
 func (p Position) IsFlat() bool  { return p.Size == 0 }
 
+// Digest kinds discriminate the two reasoning tiers: a scheduled thesis review
+// on the asset's review-timeframe close vs a rare, gate-fired deviation trigger.
+// The reasoner routes each kind to its own prompt; the executor uses the kind
+// (via Verdict.Source) to decide whether the thesis gate applies.
+const (
+	DigestReview  = "review"
+	DigestTrigger = "trigger"
+)
+
+// Deviation describes why the gate fired: which deterministic rule, how far
+// past its threshold, and on which low-timeframe bar. It rides in trigger
+// digests so the model sees the exact anomaly that earned it the call.
+type Deviation struct {
+	Rule      string  `json:"rule"` // "zscore_return"|"funding_abs"|"oi_delta_abs"|"cvd_zscore"|"invalidation"|"position_review"
+	Magnitude float64 `json:"magnitude"`
+	Timeframe string  `json:"timeframe"`
+}
+
+// Thesis is the persisted directional view the agent maintains per asset. It
+// lives in metrics (like Verdict) so the bus, batcher, and executor can all
+// reference it without importing the thesis package (which would create
+// cycles); internal/thesis re-exports it as an alias and owns persistence.
+// "neutral" is a real thesis ("stay out"), distinct from *no thesis* (never
+// reviewed, or invalidated). The JSON tags are the /api/theses wire contract.
+type Thesis struct {
+	Coin         string    `json:"coin"`
+	Direction    string    `json:"direction"` // "long" | "short" | "neutral"
+	Summary      string    `json:"summary"`   // narrative the model maintains
+	Invalidation float64   `json:"invalidation"`
+	Targets      []float64 `json:"targets"`
+	Horizon      string    `json:"horizon"` // "days" | "weeks"
+	Confidence   float64   `json:"confidence"`
+	CreatedAt    time.Time `json:"created_at"`
+	ReviewedAt   time.Time `json:"reviewed_at"`
+	Version      int       `json:"version"` // bumped per update; 0 signals "no live thesis"
+}
+
 // Digest is the per-asset snapshot the batcher freezes on each timeframe close
 // and hands to the reasoner. It is rich enough to reason about perp mechanics:
 // current metrics, a compact historical series, open-position state, and config.
@@ -159,8 +196,27 @@ type Digest struct {
 	Timeframe string
 	At        time.Time
 
+	// Kind routes the digest to its reasoning tier: DigestReview or
+	// DigestTrigger. Empty means a legacy digest (pre-thesis pipeline).
+	Kind string
+
 	Current Bar   // most recent finalized bar
 	History []Bar // last N bars, oldest-first, for regime context
+
+	// Ladder is the multi-timeframe context: timeframe name -> bars,
+	// oldest-first. Review digests carry the full rung set (1h/4h/1d/1w);
+	// trigger digests carry a compact HTF summary (short 4h/1d tails). Rungs
+	// still warming up are simply absent — the prompt notes the gap rather
+	// than fabricating bars.
+	Ladder map[string][]Bar
+
+	// Thesis is the live thesis for the coin, nil when none exists (never
+	// reviewed, or invalidated).
+	Thesis *Thesis
+
+	// Deviation is set on trigger digests (and forced reviews): the rule that
+	// fired, its magnitude, and the low timeframe it fired on.
+	Deviation *Deviation
 
 	Position    Position
 	StrategyCfg AssetStrategy
@@ -177,4 +233,7 @@ type AssetStrategy struct {
 	Timeframe            string
 	RequiresConfirmation bool
 	MaxPositionUSD       float64
+	// MaxPositionPct caps MaxPositionUSD at this fraction of live account
+	// equity when equity is known; 0 disables.
+	MaxPositionPct float64
 }

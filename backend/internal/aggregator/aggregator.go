@@ -30,7 +30,7 @@ func ParseTimeframe(name string) (Timeframe, bool) {
 	durs := map[string]time.Duration{
 		"1m": time.Minute, "5m": 5 * time.Minute, "15m": 15 * time.Minute,
 		"30m": 30 * time.Minute, "1h": time.Hour, "4h": 4 * time.Hour,
-		"1d": 24 * time.Hour,
+		"1d": 24 * time.Hour, "1w": 7 * 24 * time.Hour,
 	}
 	d, ok := durs[name]
 	return Timeframe{Name: name, Dur: d}, ok
@@ -73,10 +73,12 @@ type Aggregator struct {
 }
 
 // defaultTimeframeSet is folded for any coin lacking an explicit configuration —
-// e.g. one added at runtime via the TUI's /watch command.
+// e.g. one added at runtime via the TUI's /watch command. It matches the full
+// fold set main.go configures: LTF rungs for the deviation gate, HTF rungs for
+// the thesis-review ladder.
 func defaultTimeframeSet() []Timeframe {
 	var tfs []Timeframe
-	for _, name := range []string{"15m", "1h", "4h", "1d"} {
+	for _, name := range []string{"1m", "5m", "15m", "1h", "4h", "1d", "1w"} {
 		if tf, ok := ParseTimeframe(name); ok {
 			tfs = append(tfs, tf)
 		}

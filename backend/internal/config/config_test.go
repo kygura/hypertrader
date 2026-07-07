@@ -108,3 +108,75 @@ func TestSavePermissions(t *testing.T) {
 		t.Errorf("config perm = %o, want 600", perm)
 	}
 }
+
+// TestGateDefaultsAndMigration verifies the [gate] section: a config written
+// before the section existed (including the removed reasoner.read_every_batch
+// key) still parses and receives the non-permissive gate defaults; an explicit
+// [gate] section overrides them.
+func TestGateDefaultsAndMigration(t *testing.T) {
+	old := filepath.Join(t.TempDir(), "old.toml")
+	if err := os.WriteFile(old, []byte(`
+[markets]
+  visualized = ["BTC"]
+  tracked = ["BTC"]
+
+[reasoner]
+  batch_provider = "deepseek"
+  read_every_batch = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(old)
+	if err != nil {
+		t.Fatalf("pre-gate config must still parse: %v", err)
+	}
+	g := cfg.Gate
+	if len(g.LTFTimeframes) != 3 || g.LTFTimeframes[0] != "1m" {
+		t.Fatalf("ltf_timeframes default = %v, want [1m 5m 15m]", g.LTFTimeframes)
+	}
+	if g.ZScoreReturn != 3.0 || g.FundingAbs != 0.0008 || g.OIDeltaAbs != 0.04 || g.CVDZScore != 3.0 {
+		t.Fatalf("threshold defaults wrong: %+v", g)
+	}
+	if g.Cooldown.Duration != 30*time.Minute || !g.PositionAlways {
+		t.Fatalf("cooldown/position_always defaults wrong: %+v", g)
+	}
+
+	custom := filepath.Join(t.TempDir(), "custom.toml")
+	if err := os.WriteFile(custom, []byte(`
+[markets]
+  visualized = ["BTC"]
+
+[gate]
+  ltf_timeframes = ["5m"]
+  zscore_return = 4.5
+  cooldown = "1h"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg2, err := Load(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg2.Gate.LTFTimeframes) != 1 || cfg2.Gate.ZScoreReturn != 4.5 || cfg2.Gate.Cooldown.Duration != time.Hour {
+		t.Fatalf("[gate] overrides lost: %+v", cfg2.Gate)
+	}
+}
+
+// TestGateSectionRoundTrips verifies Save/Load preserve the gate section the
+// same way the settings modal relies on for every other section.
+func TestGateSectionRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := Default()
+	cfg.Gate.ZScoreReturn = 2.5
+	cfg.Gate.Cooldown = Duration{45 * time.Minute}
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Gate.ZScoreReturn != 2.5 || got.Gate.Cooldown.Duration != 45*time.Minute {
+		t.Fatalf("gate round-trip lost values: %+v", got.Gate)
+	}
+}

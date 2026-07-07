@@ -73,6 +73,7 @@ type Bus struct {
 	bars      topic[metrics.Bar]
 	digests   topic[metrics.Digest]
 	verdicts  topic[metrics.Verdict]
+	theses    topic[metrics.Thesis]
 	positions topic[metrics.Position]
 	journal   topic[JournalEvent]
 	status    topic[StatusEvent]
@@ -121,6 +122,7 @@ func (b *Bus) PublishMids(m metrics.MidSnapshot)  { b.mids.publish(m) }
 func (b *Bus) PublishBar(bar metrics.Bar)         { b.bars.publish(bar) }
 func (b *Bus) PublishDigest(d metrics.Digest)     { b.digests.publish(d) }
 func (b *Bus) PublishVerdict(v metrics.Verdict)   { b.verdicts.publish(v) }
+func (b *Bus) PublishThesis(t metrics.Thesis)     { b.theses.publish(t) }
 func (b *Bus) PublishPosition(p metrics.Position) { b.positions.publish(p) }
 func (b *Bus) PublishJournal(j JournalEvent)      { b.journal.publish(j) }
 func (b *Bus) PublishStatus(s StatusEvent)        { b.status.publish(s) }
@@ -134,6 +136,7 @@ func (b *Bus) SubscribeMids(buf int) <-chan metrics.MidSnapshot   { return b.mid
 func (b *Bus) SubscribeBars(buf int) <-chan metrics.Bar           { return b.bars.subscribe(buf) }
 func (b *Bus) SubscribeDigests(buf int) <-chan metrics.Digest     { return b.digests.subscribe(buf) }
 func (b *Bus) SubscribeVerdicts(buf int) <-chan metrics.Verdict   { return b.verdicts.subscribe(buf) }
+func (b *Bus) SubscribeTheses(buf int) <-chan metrics.Thesis      { return b.theses.subscribe(buf) }
 func (b *Bus) SubscribePositions(buf int) <-chan metrics.Position { return b.positions.subscribe(buf) }
 func (b *Bus) SubscribeJournal(buf int) <-chan JournalEvent       { return b.journal.subscribe(buf) }
 func (b *Bus) SubscribeStatus(buf int) <-chan StatusEvent         { return b.status.subscribe(buf) }
@@ -147,6 +150,7 @@ func (b *Bus) Close() {
 	b.bars.close()
 	b.digests.close()
 	b.verdicts.close()
+	b.theses.close()
 	b.positions.close()
 	b.journal.close()
 	b.status.close()

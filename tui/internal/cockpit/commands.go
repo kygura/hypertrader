@@ -39,8 +39,14 @@ func (m *Model) runCommand(input string) (string, tea.Cmd) {
 	case "mode":
 		return m.cmdMode(args)
 	case "clear":
+		// Display-only reset: chat scrollback, journal ring, trigger
+		// flashes, and card reasoning text. No daemon call — the daemon's
+		// journal files are untouched.
 		m.turns = nil
-		return "conversation cleared", nil
+		m.journal = nil
+		m.flashes = make(map[string]cardFlash)
+		m.displayClearedAt = timeNow()
+		return "display cleared — reasoning pane and journal scrollback reset (TUI only)", nil
 	default:
 		return "unknown command — /help lists commands", nil
 	}
@@ -54,7 +60,7 @@ func commandHelp() string {
 		"  /track [add|rm] COIN…    manage the assets the agent reasons over",
 		"  /tf TIMEFRAME COIN       set timeframe (15m,1h,4h,1d) for the named asset",
 		"  /mode propose|autonomous set execution mode",
-		"  /clear                   clear the chat scrollback",
+		"  /clear                   reset reasoning pane and journal scrollback (display only)",
 		"  /help                    this list",
 	}, "\n")
 }

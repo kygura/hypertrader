@@ -73,6 +73,23 @@ func (p Position) IsLong() bool  { return p.Size > 0 }
 func (p Position) IsShort() bool { return p.Size < 0 }
 func (p Position) IsFlat() bool  { return p.Size == 0 }
 
+// Thesis mirrors the thesis JSON of GET /api/theses and the WS "thesis"
+// topic (design: docs/superpowers/specs/2026-07-07-patient-agent-design.md,
+// "API contract"). A "neutral" direction is a real thesis ("stay out"),
+// distinct from no thesis at all (never reviewed, or invalidated).
+type Thesis struct {
+	Coin         string    `json:"coin"`
+	Direction    string    `json:"direction"` // "long" | "short" | "neutral"
+	Summary      string    `json:"summary"`
+	Invalidation float64   `json:"invalidation"`
+	Targets      []float64 `json:"targets"`
+	Horizon      string    `json:"horizon"`    // "days" | "weeks"
+	Confidence   float64   `json:"confidence"` // 0..1
+	CreatedAt    time.Time `json:"created_at"`
+	ReviewedAt   time.Time `json:"reviewed_at"`
+	Version      int       `json:"version"`
+}
+
 // MarketEntry mirrors the marketEntry JSON shape of GET /api/markets
 // (backend/internal/api/read.go).
 type MarketEntry struct {

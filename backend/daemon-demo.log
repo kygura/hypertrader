@@ -1,0 +1,20 @@
+2026/07/07 12:40:36 account 0x672018F753a1385AE028C9C9EB375FB87c8b1662: equity 985.37 USD, 1 open position(s)
+2026/07/07 12:40:37 warmup BTC 4h: 121 bars (hyperliquid)
+2026/07/07 12:40:37 warmup BTC 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:38 warmup ETH 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:39 warmup SOL 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:39 warmup HYPE 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:40 warmup XPL 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:40 warmup ZEC 1h: marketdata: marketdata: no CoinGecko id for "ZEC"
+2026/07/07 12:40:41 warmup DOGE 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:41 warmup SUI 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:42 warmup AVAX 1h: 121 bars (hyperliquid)
+2026/07/07 12:40:43 warmup BNB 1h: 121 bars (hyperliquid)
+2026/07/07 13:13:24 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
+2026/07/07 13:13:37 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
+2026/07/07 13:13:51 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
+2026/07/07 13:14:05 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
+2026/07/07 13:14:18 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
+2026/07/07 13:14:32 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
+2026/07/07 13:14:46 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
+2026/07/07 13:14:59 account poll 0x672018F753a1385AE028C9C9EB375FB87c8b1662: hlclient: status 502
