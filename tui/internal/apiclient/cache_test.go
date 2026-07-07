@@ -502,6 +502,27 @@ func TestCacheThesesSortedByCoin(t *testing.T) {
 	}
 }
 
+func TestCacheDropThesisRemovesGhost(t *testing.T) {
+	c := NewCache()
+	c.PutThesis(Thesis{Coin: "BTC", Direction: "long", Version: 3})
+	c.PutThesis(Thesis{Coin: "ETH", Direction: "short", Version: 1})
+
+	// An invalidation tombstone drops the card rather than leaving an
+	// empty-direction ghost behind.
+	c.DropThesis("BTC")
+
+	if _, ok := c.Thesis("BTC"); ok {
+		t.Error("expected BTC thesis removed after DropThesis")
+	}
+	all := c.Theses()
+	if len(all) != 1 || all[0].Coin != "ETH" {
+		t.Fatalf("expected only ETH to remain, got %+v", all)
+	}
+
+	// Dropping an unknown coin is a harmless no-op.
+	c.DropThesis("NOPE")
+}
+
 func TestCacheApplyThesesReplacesSnapshot(t *testing.T) {
 	c := NewCache()
 	c.PutThesis(Thesis{Coin: "BTC", Direction: "long"})

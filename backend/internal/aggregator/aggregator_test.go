@@ -5,8 +5,83 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hyperagent/hyperagent/internal/bus"
 	"github.com/hyperagent/hyperagent/internal/metrics"
+	"github.com/hyperagent/hyperagent/internal/store"
 )
+
+// TestMultiTimeframeFold drives trades across bucket boundaries and asserts each
+// configured rung (1m/5m/1w) folds independently: a trade landing in a new 1m
+// bucket finalizes the prior 1m bar while the coarser 5m/1w bars keep
+// accumulating, and finalizeElapsed later closes the 5m bar over the same
+// trades. The 1w bucket never elapses here, so it must stay open.
+func TestMultiTimeframeFold(t *testing.T) {
+	st, err := store.New(t.TempDir(), 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bus.New()
+	bars := b.SubscribeBars(256)
+
+	tfs := make([]Timeframe, 0, 3)
+	for _, name := range []string{"1m", "5m", "1w"} {
+		tf, ok := ParseTimeframe(name)
+		if !ok {
+			t.Fatalf("%s should parse", name)
+		}
+		tfs = append(tfs, tf)
+	}
+	a := New(b, st, map[string][]Timeframe{"BTC": tfs}, 1e12)
+
+	t0 := time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC) // Monday, aligned to 1m/5m
+	trades := []metrics.Trade{
+		{Coin: "BTC", Price: 100, Size: 1, Side: metrics.SideBuy, Time: t0},
+		{Coin: "BTC", Price: 102, Size: 1, Side: metrics.SideBuy, Time: t0.Add(30 * time.Second)},
+		{Coin: "BTC", Price: 101, Size: 1, Side: metrics.SideBuy, Time: t0.Add(70 * time.Second)}, // rolls the 1m bucket
+	}
+	for _, tr := range trades {
+		a.onTrade(tr)
+	}
+	// Close everything whose bucket has ended by t0+6m: the second 1m bar and
+	// the 5m bar. The 1w bar is still open.
+	a.finalizeElapsed(t0.Add(6 * time.Minute))
+
+	finals := map[string][]metrics.Bar{}
+	for drained := false; !drained; {
+		select {
+		case bar := <-bars:
+			if bar.Final {
+				finals[bar.Timeframe] = append(finals[bar.Timeframe], bar)
+			}
+		default:
+			drained = true
+		}
+	}
+
+	// 1m: bucket [00:00,00:01) finalized by the third trade's roll; bucket
+	// [00:01,00:02) finalized by finalizeElapsed.
+	if len(finals["1m"]) != 2 {
+		t.Fatalf("1m finalized bars = %d, want 2", len(finals["1m"]))
+	}
+	first := finals["1m"][0]
+	if first.Open != 100 || first.High != 102 || first.Low != 100 || first.Close != 102 || first.Volume != 2 {
+		t.Fatalf("first 1m bar wrong OHLCV: %+v", first)
+	}
+
+	// 5m: one bar over all three trades.
+	if len(finals["5m"]) != 1 {
+		t.Fatalf("5m finalized bars = %d, want 1", len(finals["5m"]))
+	}
+	m5 := finals["5m"][0]
+	if m5.Open != 100 || m5.High != 102 || m5.Low != 100 || m5.Close != 101 || m5.Volume != 3 {
+		t.Fatalf("5m bar wrong OHLCV: %+v", m5)
+	}
+
+	// 1w: bucket has not elapsed and no trade rolled it, so nothing finalized.
+	if len(finals["1w"]) != 0 {
+		t.Fatalf("1w finalized bars = %d, want 0 (bucket still open)", len(finals["1w"]))
+	}
+}
 
 func TestBucketStartAligns(t *testing.T) {
 	tf, ok := ParseTimeframe("1h")

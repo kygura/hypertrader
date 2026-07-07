@@ -13,15 +13,7 @@
   chat_provider = "deepseek"
   batch_model = "deepseek-chat"
   chat_model = "deepseek-chat"
-
-[gate]
-  ltf_timeframes = ["1m", "5m", "15m"]
-  zscore_return = 3.0
-  funding_abs = 0.0008
-  oi_delta_abs = 0.04
-  cvd_zscore = 3.0
-  cooldown = "30m0s"
-  position_always = true
+  read_every_batch = true
 
 [execution]
   mode = "autonomous"

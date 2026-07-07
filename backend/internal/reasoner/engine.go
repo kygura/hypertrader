@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hyperagent/hyperagent/internal/bus"
@@ -196,6 +197,12 @@ type Engine struct {
 	// without them review responses are parsed but not persisted (legacy mode).
 	theses    ThesisStore
 	onJournal func(coin, kind, summary string)
+
+	// inflight counts reason() goroutines currently running. A flush can spawn
+	// a review group and a trigger group concurrently; only the last one to
+	// finish drops the status line back to IDLE, so a fast trigger can no longer
+	// report IDLE while a review is still reasoning.
+	inflight atomic.Int32
 }
 
 // NewEngine builds the reasoning engine reading digests from digestsIn.
@@ -247,6 +254,9 @@ func (e *Engine) Run(ctx context.Context) {
 		pending = nil
 		timerC = nil
 		for kind, batch := range groups {
+			// Count the goroutine before it starts so a sibling can never see a
+			// zero inflight and publish IDLE while this one is still pending.
+			e.inflight.Add(1)
 			go e.reason(ctx, kind, batch)
 		}
 	}
@@ -291,6 +301,14 @@ func roleFor(kind string) Role {
 // tiers ride the batch provider binding — RoleReview/RoleTrigger select the
 // prompt, not the transport.
 func (e *Engine) reason(ctx context.Context, kind string, digests []metrics.Digest) {
+	// Registered first so every exit — including the no-provider return below —
+	// decrements the inflight count. Only the last group returns the line to IDLE.
+	defer func() {
+		if e.inflight.Add(-1) == 0 {
+			e.bus.PublishStatus(bus.StatusEvent{Detail: "IDLE"})
+		}
+	}()
+
 	provider, model, ok := e.registry.For(RoleBatch)
 	if !ok {
 		e.bus.PublishStatus(bus.StatusEvent{Detail: "no reasoning provider configured"})
@@ -307,7 +325,6 @@ func (e *Engine) reason(ctx context.Context, kind string, digests []metrics.Dige
 			e.bus.PublishStatus(bus.StatusEvent{Detail: fmt.Sprintf("TRIGGER %s %s", d.Coin, d.Timeframe)})
 		}
 	}
-	defer e.bus.PublishStatus(bus.StatusEvent{Detail: "IDLE"})
 
 	cctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()

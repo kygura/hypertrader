@@ -120,7 +120,19 @@ func (s *Store) Upsert(t Thesis) (Thesis, error) {
 	}
 	t.ReviewedAt = now
 	s.theses[t.Coin] = t
-	err := s.writeThrough(t)
+	if err := s.writeThrough(t); err != nil {
+		// Persist failed: roll the in-memory map back to its prior state so it
+		// never diverges from disk, and return before journaling or publishing.
+		// A success record + bus tombstone-free thesis event for a thesis that
+		// won't survive restart would lie to every live consumer.
+		if existed {
+			s.theses[t.Coin] = prev
+		} else {
+			delete(s.theses, t.Coin)
+		}
+		s.mu.Unlock()
+		return Thesis{}, err
+	}
 	s.mu.Unlock()
 
 	op := "created"
@@ -132,7 +144,7 @@ func (s *Store) Upsert(t Thesis) (Thesis, error) {
 	if s.bus != nil {
 		s.bus.PublishThesis(t)
 	}
-	return t, err
+	return t, nil
 }
 
 // Invalidate removes the live thesis for a coin, deletes its file, journals
@@ -171,7 +183,9 @@ func (s *Store) writeThrough(t Thesis) error {
 		return fmt.Errorf("thesis: encode %s: %w", t.Coin, err)
 	}
 	tmp := s.path(t.Coin) + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	// 0600: a thesis reveals the agent's live directional intent per coin —
+	// trade-sensitive, kept owner-only like config.Save's key-bearing file.
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return fmt.Errorf("thesis: write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, s.path(t.Coin)); err != nil {

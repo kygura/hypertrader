@@ -208,6 +208,18 @@ func (e *Executor) Execute(ctx context.Context, v reasoner.Verdict) error {
 	if !v.Action.IsTrade() {
 		return fmt.Errorf("action %q is not executable", v.Action)
 	}
+	// Re-run the thesis gate at execution time, not just at proposal time: a
+	// trigger-path proposal may sit pending (Telegram/API confirm) while the
+	// review tier invalidates or flips the thesis underneath it. Gating only in
+	// Handle would let a stale scalp through on approve — a TOCTOU hole. Review
+	// and legacy verdicts pass exactly as before (thesisGate no-ops on them).
+	if err := e.thesisGate(v); err != nil {
+		_ = e.journal.Record(journal.Entry{
+			Coin: v.Asset, Kind: "error",
+			Summary: err.Error(), Verdict: &v,
+		})
+		return fmt.Errorf("thesis gate: %w", err)
+	}
 	if err := e.riskCheck(v); err != nil {
 		_ = e.journal.Record(journal.Entry{
 			Coin: v.Asset, Kind: "error",

@@ -187,7 +187,10 @@ func (g *Gate) evaluate(bar metrics.Bar) []metrics.Deviation {
 	}
 
 	// Uncovered position: open exposure with no live thesis forces a review so
-	// the position is never held without a maintained view behind it.
+	// the position is never held without a maintained view behind it. It rides
+	// the same per-(coin, RulePositionReview) cooldown as every other rule
+	// (onBar → onCooldown/markFired), so an uncovered position fires one review
+	// per cooldown window — not one on every LTF bar until it's covered.
 	if g.rules.PositionAlways && !hasThesis && g.store != nil && !g.store.Position(bar.Coin).IsFlat() {
 		add(RulePositionReview, 0)
 	}

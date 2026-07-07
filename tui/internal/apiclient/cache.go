@@ -95,6 +95,15 @@ func (c *Cache) PutThesis(t Thesis) {
 	c.mu.Unlock()
 }
 
+// DropThesis removes coin's thesis — the WS invalidation-tombstone path
+// (a Version-0 event). Without this the card would linger as an empty-direction
+// ghost until the next reconnect re-seeded the snapshot.
+func (c *Cache) DropThesis(coin string) {
+	c.mu.Lock()
+	delete(c.theses, coin)
+	c.mu.Unlock()
+}
+
 // ApplyTheses replaces the whole thesis set from a GET /api/theses snapshot —
 // the on-connect cold-start path. The snapshot is authoritative: theses the
 // daemon no longer holds are dropped.

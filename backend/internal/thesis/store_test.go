@@ -2,9 +2,13 @@ package thesis
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/hyperagent/hyperagent/internal/bus"
 	"github.com/hyperagent/hyperagent/internal/metrics"
 )
 
@@ -117,6 +121,60 @@ func TestUpsertRejectsUnsafeCoin(t *testing.T) {
 	for _, coin := range []string{"", "../evil", "a/b"} {
 		if _, err := s.Upsert(metrics.Thesis{Coin: coin, Direction: "long"}); err == nil {
 			t.Fatalf("coin %q accepted", coin)
+		}
+	}
+}
+
+// TestUpsertWriteFailureRollsBack verifies the durability contract: when the
+// disk write fails, Upsert must not journal or publish a success and must leave
+// the in-memory map untouched — a thesis that won't survive restart must never
+// be visible to live consumers as if it had.
+func TestUpsertWriteFailureRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	b := bus.New()
+	published := b.SubscribeTheses(4)
+	s, err := NewStore(b, nil, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A first successful upsert establishes prior state to roll back to.
+	if _, err := s.Upsert(metrics.Thesis{Coin: "BTC", Direction: "long", Confidence: 0.7}); err != nil {
+		t.Fatalf("seed upsert: %v", err)
+	}
+	drain(published) // discard the seed publish
+
+	// Force the temp-file write to fail deterministically (independent of the
+	// filesystem's permission enforcement): occupy the temp path with a
+	// directory, so os.WriteFile to it errors.
+	if err := os.Mkdir(filepath.Join(s.dir, "BTC.json.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Upsert(metrics.Thesis{Coin: "BTC", Direction: "short", Confidence: 0.9}); err == nil {
+		t.Fatal("upsert must fail when the disk write fails")
+	}
+
+	// In-memory map rolled back to the prior (long) thesis, version unbumped.
+	got, ok := s.Get("BTC")
+	if !ok || got.Direction != "long" || got.Version != 1 {
+		t.Fatalf("map not rolled back: %+v ok=%v", got, ok)
+	}
+	// Nothing published for the failed write.
+	select {
+	case ev := <-published:
+		t.Fatalf("failed write still published a thesis: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// drain empties any already-published theses without blocking.
+func drain(ch <-chan metrics.Thesis) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
 		}
 	}
 }

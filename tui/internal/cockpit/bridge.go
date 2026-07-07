@@ -180,7 +180,14 @@ func readLoop(ctx context.Context, conn *websocket.Conn, cache *apiclient.Cache,
 		case "thesis":
 			var t apiclient.Thesis
 			if json.Unmarshal(f.Data, &t) == nil && t.Coin != "" {
-				cache.PutThesis(t)
+				// Version 0 = invalidation tombstone: drop the card rather than
+				// caching an empty-direction ghost. Any other version is a live
+				// upsert. (Snapshot re-seed on reconnect stays the authority.)
+				if t.Version == 0 {
+					cache.DropThesis(t.Coin)
+				} else {
+					cache.PutThesis(t)
+				}
 				p.Send(thesisMsg(t))
 			}
 		case "status":

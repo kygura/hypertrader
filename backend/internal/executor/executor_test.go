@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,6 +213,47 @@ func TestThesisGateRefusalMatrix(t *testing.T) {
 				t.Fatalf("err = %v, want exactly %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestApproveReRunsThesisGate pins the TOCTOU fix: a trigger-path proposal that
+// passed the gate at creation time must be re-gated at approval time, because
+// the review tier can invalidate the thesis while the proposal sits pending.
+func TestApproveReRunsThesisGate(t *testing.T) {
+	cfg := baseRisk()
+	cfg.Mode = "propose" // Handle registers a proposal instead of auto-submitting
+	st, err := store.New(t.TempDir(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bus.New()
+	jr, err := journal.New(b, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := New(cfg, b, st, jr, nil, AssetIndex{}, "http://localhost", false)
+
+	live := &fakeTheses{theses: map[string]metrics.Thesis{
+		"ETH": {Coin: "ETH", Direction: "long", Version: 1},
+	}}
+	e.SetTheses(live)
+
+	v := metrics.Verdict{Asset: "ETH", Action: metrics.ActionOpenLong, SizeUSD: 1000,
+		Entry: metrics.Entry{Type: "market"}, Confidence: 0.7, Source: metrics.DigestTrigger}
+	e.Handle(v) // thesis long → gate passes → proposal registered
+
+	pending := e.Proposals().List()
+	if len(pending) != 1 {
+		t.Fatalf("want 1 pending proposal, got %d", len(pending))
+	}
+	id := pending[0].ID
+
+	// The thesis is invalidated before the human approves.
+	delete(live.theses, "ETH")
+
+	err = e.Approve(context.Background(), id)
+	if err == nil || !strings.Contains(err.Error(), "thesis gate") {
+		t.Fatalf("Approve after invalidation err = %v, want a thesis-gate refusal", err)
 	}
 }
 
