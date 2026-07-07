@@ -36,7 +36,7 @@ func TestViewSmoke(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 110, Height: 30})
 
 	out := m.View().Content
-	for _, want := range []string{"MANDATE", "MARKET PICTURE", "EXECUTION", "THESES", "DECISION JOURNAL", "HYPERTRADER", "ETH"} {
+	for _, want := range []string{"MANDATE", "MARKET PICTURE", "EXECUTION", "THESES", "DECISION JOURNAL", "HYPERION", "ETH"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q", want)
 		}

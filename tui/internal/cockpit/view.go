@@ -62,7 +62,7 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) headerView() string {
-	left := logoStyle.Render(" HYPERTRADER ") +
+	left := logoStyle.Render(" HYPERION ") +
 		dimStyle.Render("  autonomous trading operator · Hyperliquid")
 
 	up := time.Since(m.startedAt)

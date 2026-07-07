@@ -3,7 +3,7 @@
 Standalone terminal client for the `hyperagent` daemon (`backend/`). Holds no
 market-data or execution state of its own — everything comes from the
 daemon's unified HTTP+WS core API (`backend/internal/api`). Bubble Tea
-cockpit UI: four panels plus a chat bottom bar, minimum terminal size
+cockpit UI: five panels plus a chat bottom bar, minimum terminal size
 96×28.
 
 - **MANDATE** — risk envelope (exposure, open count, uPnL, compiled gate
@@ -11,6 +11,8 @@ cockpit UI: four panels plus a chat bottom bar, minimum terminal size
 - **MARKET PICTURE** — live ingest for the visualized watchlist.
 - **EXECUTION** — the same compiled risk gates as MANDATE, rendered as
   pass/breach state.
+- **THESES** — latest thesis per tracked asset (direction, confidence,
+  invalidation level, targets, reviewed-ago).
 - **DECISION JOURNAL** — streamed candidate/fill/open/close/alert/error
   events; swaps out for the **AGENT** chat panel while chat is open.
 
