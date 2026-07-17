@@ -63,6 +63,49 @@ DEEPSEEK_API_KEY=sk-...
 Switch providers at runtime via the HTTP settings endpoint (no restart needed);
 the daemon journals provider errors and preserves prior state on failure.
 
+### Checking & managing harness authentication
+
+Two CLI subcommands help verify harness health and authenticate locally:
+
+**`hyperagent doctor`** — reports per-harness health in plain text:
+
+```sh
+./hyperagent doctor
+```
+
+Output (one block per harness):
+
+```
+claude:
+  binary: found (/usr/local/bin/claude)
+  auth: ok (logged in)
+  model: covered by auth status
+
+pi:
+  binary: found (/usr/local/bin/pi)
+  auth: ok (logged in)
+  model: covered by auth status
+
+codex:
+  binary: found (/usr/local/bin/codex)
+  auth: ok (logged in)
+  model: covered by auth status
+```
+
+**`hyperagent auth <pi|claude|codex>`** — interactively log into a harness CLI:
+
+```sh
+./hyperagent auth claude    # runs `claude auth login` with inherited terminal
+./hyperagent auth codex     # runs `codex login` with inherited terminal
+./hyperagent auth pi        # pi has no login subcommand; defers to `pi config`
+```
+
+The `auth` subcommand preserves HOME and config paths so credentials persist
+across sessions, but still excludes exchange signing keys (`HL_AGENT_KEY`,
+`HL_MASTER_ADDRESS`, `HL_AGENT_ADDRESS`). OAuth and browser-based flows work
+because the terminal is inherited. Note: `pi` has no explicit auth/login
+subcommand, so `auth pi` explains this and opens `pi config` instead.
+
 ## Wallet setup (execution)
 
 The daemon never sees your master key. Approve a scoped agent wallet once:

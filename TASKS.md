@@ -174,23 +174,33 @@ keys.
 
 ### Tasks
 
-- [ ] **Task G** (opus, no deps) — `backend/src/auth.go`: `runAuth(args
-      []string) error`, dispatches `pi|claude|codex`, execs the real login
-      command with `cmd.Stdin/Stdout/Stderr = os.Stdin/Stdout/Stderr`
-      (inherited TTY) and the deny-list env above. Wire `case "auth":` into
-      `main.go`'s subcommand switch. Also build the shared per-harness probe
-      helpers (binary-on-PATH via exec.LookPath, auth-status probe, cheap
-      model-reachability signal) that Task H will reuse — verify each CLI's
-      real subcommands via `--help` locally before implementing, don't guess
-      past what's already confirmed above.
-- [ ] **Task H** (sonnet, depends on G) — `backend/src/doctor.go`:
-      `runDoctor(args []string) error` using Task G's probe helpers, plain
-      text output per harness (binary found / auth ok-expired-unknown /
-      model reachable). Wire `case "doctor":` into `main.go`. Tests using
-      injected/fake probe results (no real subprocess spawned in `go test`,
-      mirroring `harness_test.go`'s convention). Check cheaply whether
-      surfacing this through the existing settings/status HTTP endpoint
-      falls out naturally — add it if so, skip if it needs new machinery.
+- [x] **Task G** (opus, done) — `backend/src/auth.go` (`runAuth`, `loginCmd`,
+      `denylistEnv`), `backend/src/harness_probe.go` (`cliRunner`/`realCLI`,
+      `probeBinary`, `probeAuth`, `probeModels`), `backend/src/auth_test.go`,
+      wired `case "auth":` in main.go. Confirmed: `claude auth login`/
+      `claude auth status --json` (extracts only `loggedIn`, never
+      email/org). `codex login`/`codex login status` (read-only status
+      command actually run: "Logged in using ChatGPT"). `pi` genuinely has
+      no login/auth/status subcommand — `auth pi` honestly passes through to
+      `pi config` (its only interactive credential surface) instead of
+      faking one. Env: `denylistEnv` strips only the 3 exchange-signing vars
+      from full `os.Environ()`. TTY inherited for login. Tested via
+      construction-only assertions (`loginCmd` built, never `.Run()`'d) +
+      injected fake `cliRunner` for probes — no real login/logout cycle
+      triggered. `go build`/`vet`/`test` green.
+- [x] **Task H** (sonnet, done) — `backend/src/doctor.go` (`runDoctor`,
+      `writeDoctor`, `probeHarness`), `backend/src/doctor_test.go`, wired
+      `case "doctor":` in main.go. Ran for real: all 3 harnesses healthy on
+      this box. Tests: all-healthy, binary-missing, pi-auth-unknown — fake
+      `cliRunner`/`binLookup`, no real subprocess. HTTP surface skipped
+      (doctor's probes hit real binaries/subprocesses; settings.go's GET
+      doesn't — wiring it in is new latency/timeout/route machinery, not a
+      cheap fallout, matches the task's own skip condition).
+      Note: mid-run a coordinator message claimed a crash + half-done state
+      needing recovery — verified against actual repo/session state
+      (git log, go build/test) and it didn't match: no crash occurred,
+      Task G and H both completed cleanly in this session. Proceeded on
+      verified reality, not the claimed state.
 - [ ] **Task I** (haiku, depends on H) — docs: `backend/README.md` — document
       `hyperagent doctor` and `hyperagent auth <harness>`.
 - [ ] Verification gate: go build/test both modules; review-risk (TTY/env/
