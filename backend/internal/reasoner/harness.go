@@ -53,9 +53,9 @@ func execRunner(ctx context.Context, bin string, args []string, stdin string) ([
 	// (main.go loadDotEnv); none of the reasoning CLIs need any of them — they use
 	// their own on-disk login under HOME. Passing them would hand every pi/claude/
 	// codex subprocess the exchange key for zero functional reason (and codex's
-	// read-only sandbox still lets the model read env vars). allowlistEnv keeps
+	// read-only sandbox still lets the model read env vars). AllowlistEnv keeps
 	// PATH/HOME/locale/XDG/tool-config only; anything secret-shaped is dropped.
-	cmd.Env = allowlistEnv()
+	cmd.Env = AllowlistEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &limitedWriter{w: &stdout, n: maxHarnessOutput}
 	cmd.Stderr = &limitedWriter{w: &stderr, n: 64 << 10}
@@ -88,10 +88,12 @@ var (
 	envAllowPrefix = []string{"LC_", "XDG_"}
 )
 
-// allowlistEnv returns the daemon's env filtered to the allow-list above, so a
-// reasoning subprocess can find its binaries and its own login without ever
-// seeing an exchange key or an API key.
-func allowlistEnv() []string {
+// AllowlistEnv returns the daemon's env filtered to the allow-list above, so a
+// subprocess can find its binaries and its own on-disk login without ever
+// seeing an exchange key (HL_AGENT_KEY/HL_MASTER_KEY) or an API key. Exported so
+// the `auth`/`doctor` login+probe paths in package main share this ONE deny-by-
+// default filter instead of maintaining a second, drift-prone deny-list.
+func AllowlistEnv() []string {
 	var out []string
 	for _, kv := range os.Environ() {
 		name, _, ok := strings.Cut(kv, "=")
