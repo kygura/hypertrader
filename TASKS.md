@@ -90,14 +90,30 @@ both `backend/` and `tui/`.
           1-case table test inlineable).
       SPEC.md's "registers unconditionally" wording corrected by
       orchestrator to describe the actual Custom-map mechanism.
-- [ ] **Fix round 1**: Task E (opus, reasoner/harness.go+codex.go+engine.go+
-      provider.go — env scrub, journal-on-error for all roles, timeout fix,
-      stale doc, pi/claude runner-failure test parity) + Task F (sonnet,
-      api/settings.go — harness-kind guard on key-set endpoint, GET/PUT
-      round-trip tests for review/trigger) running now, background,
-      non-overlapping files.
-- [ ] Re-verify after fix round 1: go build/test, re-check the specific
-      findings above are resolved. Round 2 only if something's still red.
+- [x] **Fix round 1**: Task E (opus) — subprocess env now allow-listed (no
+      secrets reach pi/claude/codex), codex.go comment corrected to state the
+      real (unsolved) tool-access risk instead of a false safety claim, all
+      non-chat roles now journal a failed provider call, engine timeout
+      90s->120s (the actual effective cutoff), Registry.For fails loud on a
+      blank binding, provider.go doc fixed, pi/claude runner-failure test
+      parity added. Task F (sonnet) — settings.go's key-set endpoint now
+      rejects harness-kind providers instead of silently downgrading them;
+      GET/PUT round-trip tests added for review/trigger.
+- [x] Re-verified independently by orchestrator: `go build`, `go vet`,
+      `go test ./...` green in both `backend/` and `tui/`; spot-checked the
+      actual diff (allowlistEnv, journal call, 120s timeout, provider.go
+      comment) rather than trusting the reports alone.
+- [x] Committed: 4 conventional commits (reasoner adapters, config schema,
+      engine/main/settings wiring + hardening fixes, docs).
+
+## Done
+
+Feature complete. `cd backend && go build ./... && go test ./...` and
+`cd tui && go build ./... && go test ./...` both green. See final report for
+the one remaining known-accepted risk (codex's read-only sandbox doesn't
+disable shell/read tools — mitigated by env scrubbing, never defaulted) and
+minor un-actioned ponytail-review nit (~13 lines, harness.go's redundant
+LookPath pre-check).
 - [ ] Final report to user.
 
 ## Frontier
