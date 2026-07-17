@@ -62,11 +62,20 @@ func (t Timeframe) For(coin string) string {
 // optional: when blank, a role uses its provider's default model. They are what
 // make per-role model selection configurable up front; the TUI's /model command
 // and picker override them live.
+//
+// ReviewProvider/ReviewModel bind RoleReview (thesis formation) and
+// TriggerProvider/TriggerModel bind RoleTrigger (trade-execution decision) —
+// independently from BatchProvider/BatchModel, so the two roles can run
+// different models instead of collapsing onto one binding.
 type Reasoner struct {
-	BatchProvider string `toml:"batch_provider"`
-	ChatProvider  string `toml:"chat_provider"`
-	BatchModel    string `toml:"batch_model"` // optional; defaults to the provider's model
-	ChatModel     string `toml:"chat_model"`  // optional; defaults to the provider's model
+	BatchProvider   string `toml:"batch_provider"`
+	ChatProvider    string `toml:"chat_provider"`
+	ReviewProvider  string `toml:"review_provider"`
+	TriggerProvider string `toml:"trigger_provider"`
+	BatchModel      string `toml:"batch_model"`   // optional; defaults to the provider's model
+	ChatModel       string `toml:"chat_model"`    // optional; defaults to the provider's model
+	ReviewModel     string `toml:"review_model"`  // optional; defaults to the provider's model
+	TriggerModel    string `toml:"trigger_model"` // optional; defaults to the provider's model
 }
 
 // Gate configures the deterministic deviation detector that decides when a
@@ -132,8 +141,11 @@ type ProviderCfg struct {
 	// picker. It is a convenience only — any model id can be typed free-form at
 	// runtime, so endpoints exposing hundreds of models (OpenRouter) still work.
 	Models []string `toml:"models"`
-	// Kind selects the wire protocol for Custom providers: "openai" (default) or
-	// "anthropic". The three named providers set this implicitly.
+	// Kind selects the wire protocol for Custom providers: "openai" (default),
+	// "anthropic", or one of the harness kinds that spawn an authenticated CLI
+	// subprocess instead of calling an HTTP API — "harness-pi", "harness-claude",
+	// "harness-codex". The three named providers set this implicitly. Harness
+	// kinds need no APIKey; the CLI carries its own auth.
 	Kind string `toml:"kind"`
 }
 

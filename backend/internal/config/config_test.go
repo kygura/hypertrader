@@ -162,6 +162,123 @@ func TestGateDefaultsAndMigration(t *testing.T) {
 	}
 }
 
+// TestReasonerRoleBindings verifies the four role bindings (batch/chat/review/
+// trigger) round-trip through TOML load, and that a harness-kind Custom
+// provider (no api_key, CLI carries its own auth) loads clean.
+func TestReasonerRoleBindings(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want Reasoner
+	}{
+		{
+			name: "shipped config.toml defaults",
+			body: `
+[markets]
+  visualized = ["BTC"]
+
+[reasoner]
+  review_provider = "claude-harness"
+  review_model = ""
+  trigger_provider = "pi-harness"
+  trigger_model = "gpt-5.6-luna"
+  batch_provider = "pi-harness"
+  batch_model = "gpt-5.6-luna"
+  chat_provider = "deepseek"
+  chat_model = "deepseek-chat"
+`,
+			want: Reasoner{
+				ReviewProvider:  "claude-harness",
+				TriggerProvider: "pi-harness",
+				TriggerModel:    "gpt-5.6-luna",
+				BatchProvider:   "pi-harness",
+				BatchModel:      "gpt-5.6-luna",
+				ChatProvider:    "deepseek",
+				ChatModel:       "deepseek-chat",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if cfg.Reasoner != tc.want {
+				t.Fatalf("reasoner = %+v, want %+v", cfg.Reasoner, tc.want)
+			}
+		})
+	}
+}
+
+// TestReasonerRoleBindingsSaveLoad verifies Save/Load preserve the new
+// review/trigger fields the same way batch/chat already do.
+func TestReasonerRoleBindingsSaveLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := Default()
+	cfg.Reasoner.ReviewProvider = "claude-harness"
+	cfg.Reasoner.ReviewModel = ""
+	cfg.Reasoner.TriggerProvider = "pi-harness"
+	cfg.Reasoner.TriggerModel = "gpt-5.6-luna"
+
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Reasoner.ReviewProvider != "claude-harness" || got.Reasoner.TriggerProvider != "pi-harness" || got.Reasoner.TriggerModel != "gpt-5.6-luna" {
+		t.Fatalf("review/trigger bindings lost: %+v", got.Reasoner)
+	}
+}
+
+// TestHarnessProviderKindNeedsNoAPIKey verifies a Custom provider with a
+// harness Kind (spawns an authenticated CLI subprocess, not an HTTP API with a
+// stored key) loads clean with a blank api_key — the same tolerance-of-missing-
+// key posture the named openai/anthropic/deepseek providers already get.
+func TestHarnessProviderKindNeedsNoAPIKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `
+[markets]
+  visualized = ["BTC"]
+
+[providers.custom.claude-harness]
+  api_key = ""
+  api_key_env = ""
+  model = ""
+  kind = "harness-claude"
+
+[providers.custom.pi-harness]
+  api_key = ""
+  api_key_env = ""
+  model = "gpt-5.6-luna"
+  kind = "harness-pi"
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("harness-kind provider with blank api_key must load: %v", err)
+	}
+	claude, ok := cfg.Providers.Custom["claude-harness"]
+	if !ok || claude.Kind != "harness-claude" {
+		t.Fatalf("claude-harness custom provider missing or wrong kind: %+v", cfg.Providers.Custom)
+	}
+	if claude.Key("") != "" {
+		t.Errorf("harness provider should resolve no key, got %q", claude.Key(""))
+	}
+	pi, ok := cfg.Providers.Custom["pi-harness"]
+	if !ok || pi.Kind != "harness-pi" || pi.Model != "gpt-5.6-luna" {
+		t.Fatalf("pi-harness custom provider missing/wrong: %+v", cfg.Providers.Custom)
+	}
+}
+
 // TestGateSectionRoundTrips verifies Save/Load preserve the gate section the
 // same way the settings modal relies on for every other section.
 func TestGateSectionRoundTrips(t *testing.T) {

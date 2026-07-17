@@ -9,11 +9,23 @@
     BTC = "4h"
 
 [reasoner]
-  batch_provider = "deepseek"
+  review_provider = "claude-harness"
+  review_model = ""
+  trigger_provider = "pi-harness"
+  trigger_model = "gpt-5.6-luna"
+  batch_provider = "pi-harness"
+  batch_model = "gpt-5.6-luna"
   chat_provider = "deepseek"
-  batch_model = "deepseek-chat"
   chat_model = "deepseek-chat"
-  read_every_batch = true
+
+[gate]
+  ltf_timeframes = ["1m", "5m", "15m"]
+  zscore_return = 3.0
+  funding_abs = 0.0008
+  oi_delta_abs = 0.04
+  cvd_zscore = 3.0
+  cooldown = "30m0s"
+  position_always = true
 
 [execution]
   mode = "autonomous"
@@ -53,6 +65,19 @@
     base_url = "https://api.deepseek.com/v1"
     models = ["deepseek-chat", "deepseek-reasoner"]
     kind = ""
+  [providers.custom.claude-harness]
+    api_key = ""
+    api_key_env = ""
+    model = ""
+    kind = "harness-claude"
+  [providers.custom.pi-harness]
+    api_key = ""
+    api_key_env = ""
+    model = "gpt-5.6-luna"
+    kind = "harness-pi"
+    # base_url carries pi's --provider sub-backend for harness-pi (no HTTP endpoint
+    # is used); blank defaults to openai-codex, the GPT-5.6 backend.
+    base_url = "openai-codex"
 
 [storage]
   dir = "./data"
