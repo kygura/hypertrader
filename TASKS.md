@@ -106,14 +106,97 @@ both `backend/` and `tui/`.
 - [x] Committed: 4 conventional commits (reasoner adapters, config schema,
       engine/main/settings wiring + hardening fixes, docs).
 
-## Done
+## Done (increment 1)
 
 Feature complete. `cd backend && go build ./... && go test ./...` and
-`cd tui && go build ./... && go test ./...` both green. See final report for
-the one remaining known-accepted risk (codex's read-only sandbox doesn't
-disable shell/read tools — mitigated by env scrubbing, never defaulted) and
-minor un-actioned ponytail-review nit (~13 lines, harness.go's redundant
-LookPath pre-check).
+`cd tui && go build ./... && go test ./...` both green. Known-accepted risk:
+codex's read-only sandbox doesn't disable shell/read tools (mitigated by env
+scrubbing, never defaulted). Minor un-actioned ponytail nit (~13 lines,
+harness.go's redundant LookPath pre-check).
+
+## Increment 2 — doctor + in-app auth (coordinator-approved follow-up)
+
+### Destination
+
+`hyperagent doctor` reports per-harness health (binary/auth/model) in plain
+script-friendly text. `hyperagent auth <pi|claude|codex>` execs that CLI's
+real interactive login with inherited TTY so OAuth/browser flows work,
+using an env that keeps HOME/config paths intact (unlike the scrubbed
+allow-list used for reasoning calls) but still never leaks exchange signing
+keys.
+
+### Real CLI facts (verified locally by orchestrator, trust these)
+
+- `claude auth status` → prints a JSON object with a `loggedIn` bool (plus
+  email/org — don't echo that raw into doctor output, extract just the bool).
+  `claude auth login` is the interactive login subcommand. `claude doctor`
+  exists too (installation health, not auth) — not what we want for the auth
+  check.
+- `codex login status` → plain text, confirmed real output today:
+  `Logged in using ChatGPT`. `codex login` (bare) is the interactive login
+  subcommand. `codex doctor --json` also exists (full health incl. auth) —
+  either works, `login status` is the narrower/cheaper probe.
+  Codex has NO usage quota this session (confirmed repeatedly) — don't spend
+  a live completion call proving this feature; smoke-test the Go plumbing
+  (subprocess construction, TTY wiring) rather than the actual interactive
+  OAuth flow, and don't force a logout/re-login cycle in this shared dev
+  environment (codex is already logged in).
+- `pi` — **no explicit login/auth/status subcommand found** in `pi --help`
+  (only install/remove/update/list/config). Auth appears to be via
+  `--api-key` flag, provider env vars (e.g. `ANTHROPIC_OAUTH_TOKEN`), or
+  `pi config`'s TUI. `pi --list-models` runs instantly with no visible
+  network call and lists models regardless of live auth state, so it is
+  NOT a reliable "auth valid" signal — worker must verify further and pick
+  the most honest real check, or report plainly that pi has no auth-status
+  primitive and doctor should say "unknown, see `pi config`" rather than
+  fabricate a check. Same for `auth pi`: if no real interactive login
+  subcommand exists, don't fake one — implement `auth pi` as a clear
+  informative passthrough (e.g. exec `pi config` for credential management,
+  or print how pi actually resolves credentials) instead of silently no-op'ing.
+- `main.go` already has a subcommand dispatch pattern (`os.Args[1]` switch,
+  one file per subcommand: `approve.go`, `mcp.go`) — follow it exactly, add
+  `doctor.go` and `auth.go`.
+
+### Decisions so far
+
+- `auth <harness>` subprocess env: full `os.Environ()` minus a deny-list of
+  just `HL_AGENT_KEY`/`HL_MASTER_ADDRESS`/`HL_AGENT_ADDRESS` — opposite
+  direction from `harness.go`'s reasoning-call `allowlistEnv()` (which is a
+  strict allow-list). Login flows need real HOME/config-home to persist
+  credentials; only the exchange signing keys are named as forbidden by the
+  coordinator, so nothing else is scrubbed here.
+- Doctor's checks reuse the same probe helpers `auth`'s CLI-detection code
+  builds — sequential: Task G (opus, auth + probe helpers) then Task H
+  (sonnet, doctor + tests) on top.
+- HTTP surfacing of doctor status: optional, only if it falls out cheaply
+  from Task H's own structured result type — no new TUI screens this round
+  regardless.
+
+### Tasks
+
+- [ ] **Task G** (opus, no deps) — `backend/src/auth.go`: `runAuth(args
+      []string) error`, dispatches `pi|claude|codex`, execs the real login
+      command with `cmd.Stdin/Stdout/Stderr = os.Stdin/Stdout/Stderr`
+      (inherited TTY) and the deny-list env above. Wire `case "auth":` into
+      `main.go`'s subcommand switch. Also build the shared per-harness probe
+      helpers (binary-on-PATH via exec.LookPath, auth-status probe, cheap
+      model-reachability signal) that Task H will reuse — verify each CLI's
+      real subcommands via `--help` locally before implementing, don't guess
+      past what's already confirmed above.
+- [ ] **Task H** (sonnet, depends on G) — `backend/src/doctor.go`:
+      `runDoctor(args []string) error` using Task G's probe helpers, plain
+      text output per harness (binary found / auth ok-expired-unknown /
+      model reachable). Wire `case "doctor":` into `main.go`. Tests using
+      injected/fake probe results (no real subprocess spawned in `go test`,
+      mirroring `harness_test.go`'s convention). Check cheaply whether
+      surfacing this through the existing settings/status HTTP endpoint
+      falls out naturally — add it if so, skip if it needs new machinery.
+- [ ] **Task I** (haiku, depends on H) — docs: `backend/README.md` — document
+      `hyperagent doctor` and `hyperagent auth <harness>`.
+- [ ] Verification gate: go build/test both modules; review-risk (TTY/env/
+      subprocess-exec is the security-relevant surface again) +
+      review-reliability; ponytail-review. Fix → re-verify, max 3 rounds.
+- [ ] Commit (conventional, granular) + final report.
 - [ ] Final report to user.
 
 ## Frontier
