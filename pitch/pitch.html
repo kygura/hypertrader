@@ -71,6 +71,7 @@
 
   [data-hero-anim] { opacity: 0; animation: htRise .95s var(--ease-out) forwards; }
   [data-hero-anim="0"] { animation-delay: .08s; }
+  [data-hero-anim="1"] { animation-delay: .32s; }
   [data-hero-anim="2"] { animation-delay: .5s; }
   [data-hero-anim="3"] { animation-delay: .66s; }
   [data-hero-anim="4"] { animation-delay: .82s; }
@@ -122,6 +123,7 @@
   .hero-kicker { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin-bottom: 22px; }
   .hero .brand-hero { font-size: clamp(64px, 11vw, 156px); line-height: 0.92; letter-spacing: -0.02em; margin: 0 0 22px; overflow: hidden; padding-bottom: 0.06em; }
   .brand-hero .ltr { display: inline-block; transform: translateY(112%); animation: htLtr 1s var(--ease-out) forwards; animation-delay: calc(.14s + var(--i) * .045s); }
+  .hero .subhead { font-family: "IBM Plex Mono", monospace; font-size: clamp(13px, 1.4vw, 15px); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink2); margin: 0 0 22px; }
   .hero .tagline { font-family: "Newsreader", serif; font-style: italic; font-weight: 400; font-size: clamp(19px, 2.3vw, 27px); line-height: 1.45; color: var(--ink); max-width: 34ch; margin: 0 0 26px; }
   .hero p.lead { font-size: 17px; line-height: 1.65; color: var(--ink2); max-width: 55ch; margin: 0 0 40px; }
   .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
@@ -369,6 +371,7 @@
   <div class="wrap hero-inner">
     <p data-hero-anim="0" class="hero-kicker">Pre-seed &middot; 2026</p>
     <h1 class="brand-hero" aria-label="Hyperion"><span aria-hidden="true"><span class="ltr" style="--i:0">H</span><span class="ltr" style="--i:1">y</span><span class="ltr" style="--i:2">p</span><span class="ltr" style="--i:3">e</span><span class="ltr" style="--i:4">r</span><span class="ltr" style="--i:5">t</span><span class="ltr" style="--i:6">r</span><span class="ltr" style="--i:7">a</span><span class="ltr" style="--i:8">d</span><span class="ltr" style="--i:9">e</span><span class="ltr" style="--i:10">r</span></span></h1>
+    <p data-hero-anim="1" class="subhead">The avenue for vibe-trading</p>
     <p data-hero-anim="2" class="tagline">An autonomous trading operator, built on Hyperliquid.</p>
     <p data-hero-anim="3" class="lead">Hyperion runs a trading desk that never sleeps. It ingests markets continuously, reasons about them in writing, and executes toward long-term financial goals you state in plain language.</p>
     <div data-hero-anim="4" class="cta-row">
