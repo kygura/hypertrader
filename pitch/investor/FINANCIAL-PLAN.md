@@ -2,253 +2,71 @@
 
 Hyperion's revenue model and path to profitability.
 
----
+## Reality Check
 
-## Honest Starting Point
+No proprietary moat here. The EIP-712 signing, the reasoning loop, the risk gates could all be rebuilt by a competitor with enough time. Hyperion ships as a composable server: a long-running backend you either self-host or run on our managed cloud. This plan prices like infrastructure, not like a defensible black box.
 
-Hyperion has limited proprietary technical moat. EIP-712 signing, an LLM reasoning loop, and compiled risk gates are all things a well-resourced competitor could rebuild. The product ships as a composable server — a single long-running backend a trader can self-host or run on our managed cloud — not a closed black-box bot. This plan assumes infrastructure-style economics (hosting, support, convenience) rather than a durable-moat premium, and prices accordingly.
+## Revenue
 
-## Revenue Streams
+Managed Cloud is the primary line: a monthly subscription to run the backend on our infrastructure instead of your own server.
 
-### 1. Managed Cloud (primary)
+| Tier | Monthly | Agents | Target user |
+|---|---|---|---|
+| Starter | $49 | 1, shared infra | Retail traders |
+| Pro | $199 | Up to 5, dedicated resources | Semi-pro, small funds |
+| Enterprise | From $2k | Dedicated deployment, SLA | Trading firms |
 
-**Model:** Monthly subscription to run the backend on our infrastructure instead of the customer's own server.
+Self-hosters can run the same binary for free, so what's actually for sale is convenience: no ops burden, always-on, support. A self-hosted Pro license ($500 to $2,000 a year) unlocks multi-agent orchestration, alerting, and priority support for people who don't want the cloud tier. Enterprise deals ($5k to $20k a month) cover dedicated deployments and custom risk gates for funds.
 
-| Tier | Monthly | Annual | Agents | Target User |
-|------|---------|--------|--------|-------------|
-| Starter | $49 | $588 | 1 agent, shared infra | Retail traders, students |
-| Pro | $199 | $2,388 | Up to 5 agents, dedicated resources, priority reasoning | Semi-pro, small funds |
-| Enterprise | Custom (from $2k/mo) | — | Dedicated deployment, custom risk gates, SLA | Trading firms, funds |
+## Unit Economics
 
-Pricing logic:
-- Priced like infrastructure hosting, not like a proprietary black box — a self-hoster can always run the same binary for free.
-- - Convenience (no ops burden, always-on, support) is what's for sale, not exclusivity of the technology.
-  - - Volume discounts for firms deploying multiple agents.
-   
-    - ### 2. Self-Hosted Pro License
-   
-    - **Model:** One-time or annual license for self-hosters who want features beyond the free/open core.
-   
-    - - Multi-agent orchestration (running several mandates from one control plane)
-      - - Premium dashboards, alerting/webhooks
-        - - Priority support and onboarding help
-          - - Roughly $500-$2,000/year depending on scale
-           
-            - ### 3. Enterprise Deployments & Support
-           
-            - **Model:** Custom contracts for funds or trading firms that want a private deployment.
-           
-            - Example deals:
-            - - $5k-$20k/month for a fund's dedicated agent fleet (custom risk gates, private cloud, SLA)
-              - - Integration/consulting fees for firms embedding Hyperion into their own infra
-               
-                - Typical terms: 1-year contracts, dedicated support, custom onboarding.
-               
-                - ## Unit Economics
-               
-                - ### Customer Acquisition Cost (CAC)
-               
-                - Assumption: organic growth + word-of-mouth + content marketing (self-hosted/composable products lean on community, not paid ads).
-               
-                - | Channel | Spend/Year | Expected Users/Year | CAC |
-                - |---------|-----------|---------------------|-----|
-                - | Content (docs, blog, build-in-public) | $5k | 40 | $125 |
-                - | Community (Discord, open-source contributions) | $5k | 40 | $125 |
-                - | Events + speaking | $10k | 20 | $500 |
-                - | Partnerships | $0 | 20 | $0 |
-                - | **Total** | **$20k** | **120** | **$167** |
-               
-                - ### Lifetime Value (LTV)
-               
-                - Because there's no durable moat, we assume higher churn than a typical locked-in SaaS: 25% annual churn (customers can self-host and leave at any time), ~2-year average lifetime.
-               
-                - Managed Cloud Pro customer:
-                - - Pays: $199/month x 12 = $2,388/year
-                  - - Lifetime: $2,388 x 2 years = $4,776
-                   
-                    - Self-hosted Pro license customer:
-                    - - Pays: ~$1,200/year average
-                      - - Lifetime: $1,200 x 2 years = $2,400
-                       
-                        - Blended LTV (assume 60% cloud / 40% self-hosted mix): ~$3,830
-                       
-                        - **LTV:CAC ratio: ~$3,830 / $167 is approximately 23:1** — healthy, but nowhere near the "500:1" a hard-moat product might claim. This is closer to what an open, low-lock-in infrastructure product should expect.
-                       
-                        - ### Gross Margin
-                       
-                        - Cost of goods sold (COGS) — this is where the composable-server model actually costs us money, unlike a pure SaaS:
-                       
-                        - - Managed Cloud hosting (compute + storage per tenant): ~$15-$25/month per instance
-                          - - LLM reasoning API costs (Claude/OpenAI/Deepseek): ~$5-$15/user/month depending on activity (self-hosters pay this themselves with their own API key; only managed-cloud customers hit our COGS)
-                            - - Support: amortized, ~$5/user/month at scale
-                             
-                              - Total COGS per managed-cloud user: ~$25-$45/month.
-                             
-                              - Gross margin on Managed Cloud Pro ($199/month):
-                              - - Revenue: $199
-                                - - COGS: ~$35
-                                  - - Gross profit: ~$164
-                                    - - **Margin: ~82%**
+CAC is low and mostly organic: content, community, and a little event spend land around $167 per customer blended, on roughly $20k of spend for 120 users a year.
 
-                                    Gross margin on self-hosted license (no hosting/reasoning COGS on our side):
-                                    - **Margin: ~95%+** (mostly support cost)
-                                   
-                                    - Blended gross margin: **~85%** (conservative — assumes managed cloud is the majority of revenue, since that's the higher-touch, most requested option).
-                                   
-                                    - ## Financial Projections (5-Year)
-                                   
-                                    - Assumptions:
-                                    - - Year 1: 60 active customers (mostly Starter/self-hosted, some Pro)
-                                      - - Growth: 150% YoY (more conservative than a hard-moat SaaS — low lock-in means renewals have to be earned)
-                                        - - Churn: 25% annually
-                                          - - CAC: ~$170, improving slightly as community/content compounds
-                                           
-                                            - ### Year 1 (Launch)
-                                            - | Metric | Value |
-                                            - |--------|-------|
-                                            - | Active customers | 60 |
-                                            - | Mix | 40 self-hosted Pro, 20 Managed Cloud |
-                                            - | Subscription/license MRR | ~$5,600 |
-                                            - | ARR | ~$67,000 |
-                                            - | COGS | $15k |
-                                            - | R&D + Ops | $150k |
-                                            | Sales + Marketing | $20k |
-                                 
-| **Operating loss** | **-$280k** |
-### Year 2
-| Metric | Value |
-|--------|-------|
-| Active customers | 150 |
-| MRR | ~$18,000 |
-| ARR | ~$216,000 |
-| COGS | $40k |
-| R&D + Ops | $220k |
-| Sales + Marketing | $40k |
-| **Operating loss** | **-$180k** |
+Because there's no lock-in, churn is realistically high: call it 25% a year, a 2-year average customer life. A Managed Cloud Pro customer is worth about $4,800 over that lifetime; a self-hosted license customer about $2,400. Blended LTV lands near $3,800, for an LTV:CAC around 23:1. Solid, not the inflated 500:1 you'd get by pretending the tech itself is the moat.
 
-### Year 3 (Approaching Breakeven)
-| Metric | Value |
-|--------|-------|
-| Active customers | 400 |
-| MRR | ~$50,000 |
-| ARR | ~$600,000 |
-| COGS | $100k |
-| R&D + Ops | $350k |
-| Sales + Marketing | $80k |
-| **Operating profit/loss** | **~breakeven** |
+Self-hosted customers cost us almost nothing beyond support. Managed Cloud customers cost roughly $25 to $45 a month in hosting and reasoning API spend against $199 of revenue, around 82% margin there and about 85% blended.
 
-### Year 4-5
+## Projections
 
-Scaling: 800-1,200 customers plus a handful of enterprise deployments, $1.5-$3M ARR, operating margin 20-30% (lower than a hard-moat product, consistent with infrastructure-style pricing and higher churn).
+| Year | Customers | ARR | Operating result |
+|---|---|---|---|
+| 1 | 60 | ~$67k | -$280k |
+| 2 | 150 | ~$216k | -$180k |
+| 3 | 400 | ~$600k | ~breakeven |
 
-## Addressable Market (SAM)
+Years 4 and 5: 800 to 1,200 customers plus a handful of enterprise deals, $1.5M to $3M ARR, 20-30% operating margin. Slower and thinner than a hard-moat SaaS story, which is consistent with higher churn and infrastructure-style pricing.
 
-### Hyperliquid Prosumers (Near-Term TAM)
+## Market
 
-Population: ~50,000 active traders on Hyperliquid.
-Addressable: 10-15% willing to try a self-hosted or managed agent = 5,000-7,500 traders.
+Hyperliquid has about 50,000 active traders. If 10-15% will try a self-hosted or managed agent, 500 paying customers at a $100 a month blend gets to roughly $600k ARR near-term. Widen to all on-chain perp venues (200,000+ traders) and the 5-year opportunity is closer to $3.6M ARR. Add 30-50 enterprise deployments at $8k a month average and enterprise alone could add another $3.8M ARR. Conservative total: $5M to $15M by 2030, smaller than a typical SaaS pitch but realistic for an infrastructure product without a hard moat.
 
-Revenue potential: 500 paying customers (Managed Cloud + self-hosted mix), average ~$100/month blended = ~$600k ARR.
+## Use of Funds ($500k)
 
-### Broader On-Chain Perps (5-Year TAM)
+| Item | Amount |
+|---|---|
+| Founder salary | $100k |
+| Infra and hosting | $75k |
+| Reasoning and API costs | $25k |
+| Community and content | $50k |
+| Buffer | $50k |
 
-Population: 200,000+ traders across on-chain perp venues.
-Addressable: 5% adopt agent-based, self-hostable execution = 10,000 customers.
-Revenue potential: 2,000 paying customers, average ~$150/month = ~$3.6M ARR.
+A 12-month budget, but runway stretches past 18 months since self-hosters absorb their own infra and reasoning costs.
 
-### Enterprise Deployments (10-Year TAM)
+## Risks
 
-Population: 500+ crypto hedge funds/prop firms.
-Addressable: 30-50 firms want a dedicated, self-hosted or private-cloud deployment.
-Revenue potential: 40 contracts x ~$8k/month average = ~$3.8M ARR.
+The biggest one is the lack of a technical moat: anyone with enough time could rebuild this. The bet is on distribution and being first to run real capital through it in public, not on defensibility of the code. Other risks worth naming: self-hosting eating into Managed Cloud revenue (expected and priced in), regulatory pressure on on-chain trading, LLM API price hikes (mitigated by multi-model support), and solo-founder key-person risk.
 
-**Total SAM (conservative): $5-15M by 2030** — smaller than a hard-moat SaaS story, but realistic for an infrastructure/composable-server product with real, if modest, lock-in.
+## FAQ
 
-## Path to Profitability
+Will this be profitable? Plausibly. About 85% gross margin, 23:1 LTV:CAC, breakeven around year three.
 
-| Milestone | Timeline | Status |
-|-----------|----------|--------|
-| Self-hosted release (binary + docs) | Q3 2026 | In progress |
-| Managed Cloud beta | Q4 2026 | Target |
-| First paying customers | Q4 2026 | Target |
-| $5k MRR | Q1 2027 | Target |
-| Approaching breakeven | Year 3 | Projected |
+What if someone forks it? They can. It's a composable server, not a locked appliance, so the bet is on trust and convenience rather than code exclusivity.
 
-### Unit Economics Sensitivity
+Can an LLM trade profitably? It isn't trying to beat the market. It executes a stated mandate, risk gates cap the downside regardless of reasoning quality, and the journal is the feedback loop.
 
-If churn rises to 35% (self-hosting makes leaving easy): LTV drops to ~$2,700, LTV:CAC ~16:1 — still workable, thinner.
+Competition? Static bots like 3Commas, chat copilots that never execute, and human prop desks. None of them ship as a composable, self-hostable execution layer.
 
-If CAC rises to $300 (paid acquisition needed): LTV:CAC ~13:1 — still above the 3:1 bar, but margin for error shrinks.
-
-If Managed Cloud hosting costs run higher than expected (~$50/month COGS): blended gross margin drops to ~70% — still healthy for an infra product.
-
-## Use of Funds ($500k Seed)
-
-Requested: $500k (via YC SAFE).
-
-| Item | Amount | Duration |
-|------|--------|----------|
-| Salary (founder) | $100k | 12 months |
-| Infrastructure + hosting (managed cloud build-out) | $75k | 12 months |
-| Reasoning/API costs (development + early customers) | $25k | 12 months |
-| Community + content (docs, open-source support) | $50k | 12 months |
-| Buffer (tax, legal, contingency) | $50k | Ongoing |
-| **Total** | **$300k** | **12 months** |
-
-Runway: 18+ months given the lower burn of a composable, largely self-hosted product (customers absorb a lot of their own infra/reasoning cost).
-
-## Risks & Mitigations
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Low technical moat — easy to replicate | High | Compete on distribution, composability (MCP-native), and being first to run real capital through it publicly, not on defensibility of the code |
-| Market adoption slow (TAM smaller than expected) | High | Early user feedback; pivot toward enterprise/private deployments if needed |
-| Self-hosting cannibalizes Managed Cloud revenue | Medium | Expected and priced in — self-hosted Pro license is a real revenue line, not just a loss leader |
-| Regulatory crackdown on on-chain trading | High | Legal review; diversify to multiple venues |
-| Claude/LLM API price hikes | Medium | Multi-model support (OpenAI, Deepseek fallback); self-hosters bring their own key |
-| Key person risk (solo founder) | Medium | Document everything; look for a technical co-founder |
-| Security breach or signing bug | High | Security review; scoped agent-wallet keys that can trade but never withdraw |
-
-## Key Metrics to Track
-
-**Growth:** active self-hosted instances (best-effort telemetry, opt-in), Managed Cloud signups, churn rate.
-**Revenue:** Managed Cloud MRR, license revenue, ARPU, LTV:CAC.
-**Product:** median mandate lifetime, orders per user per month, win rate, reasoning confidence trends from the journal.
-**Operational:** CAC payback period, gross margin, burn rate, runway.
-
-## Investor FAQs
-
-**Will Hyperion be profitable?**
-Plausibly, but the path is closer to infrastructure economics than a hard-moat SaaS: ~85% blended gross margin, LTV:CAC around 23:1, and breakeven targeted around year 3 rather than year 1-2.
-
-**What happens if someone forks it?**
-They can — it's a composable server, not a locked appliance. The bet is that distribution, trust from running real capital in public, and convenience (managed cloud, support) matter more than code exclusivity.
-
-**Can an LLM really trade profitably?**
-The LLM isn't trying to beat the market — it's executing a stated mandate (a goal, not a return target). Compiled risk gates prevent catastrophic loss regardless of reasoning quality, and the journal gives a feedback loop for improving the reasoning over time.
-
-**What's the competition?**
-Static bots (3Commas, grid/DCA tools), chat copilots (advice without execution), and traditional prop desks (humans, not agents). None of them ship as a composable, self-hostable execution layer — that's the differentiation, not a patent.
-
-**Can you scale to $100M ARR?**
-Unlikely on this model alone without a moat-driven premium; more realistically this is a $5-15M ARR business by 2030 unless enterprise deployments significantly outperform, or genuine defensibility (e.g., a mandate/reputation network effect) emerges over time.
-
-## Summary
-
-| Metric | Value |
-|--------|-------|
-| Gross Margin | ~85% |
-| LTV:CAC | ~23:1 |
-| Breakeven | ~Year 3 |
-| Year 3 ARR | ~$600k |
-| TAM (5 years) | $5-15M |
-| Risk Level | Medium-High (low technical moat, adoption, regulation) |
-
-Hyperion is a smaller, more honest bet than a hard-moat SaaS story: real infrastructure economics, a composable/self-hosted distribution model, and a founder who already runs it on his own capital daily.
+$100M ARR? Unlikely without a moat-driven premium. More realistically a $5M to $15M business by 2030, unless enterprise outperforms or real defensibility, maybe a reputation network effect, shows up later.
 
 ---
-Prepared: July 2026
-Reviewed by: Founder
-
-Prepared: July 2026
-Reviewed by: Founder
+Prepared July 2026. Reviewed by founder.
