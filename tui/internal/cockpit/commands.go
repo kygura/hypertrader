@@ -3,6 +3,7 @@ package cockpit
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -38,6 +39,8 @@ func (m *Model) runCommand(input string) (string, tea.Cmd) {
 		return m.cmdTimeframe(args), nil
 	case "mode":
 		return m.cmdMode(args)
+	case "login":
+		return m.cmdLogin(args)
 	case "clear":
 		// Display-only reset: chat scrollback, journal ring, trigger
 		// flashes, and card reasoning text. No daemon call — the daemon's
@@ -60,6 +63,7 @@ func commandHelp() string {
 		"  /track [add|rm] COIN…    manage the assets the agent reasons over",
 		"  /tf TIMEFRAME COIN       set timeframe (15m,1h,4h,1d) for the named asset",
 		"  /mode propose|autonomous set execution mode",
+		"  /login pi|claude|codex|kimi  run harness's real interactive login (same host as daemon only)",
 		"  /clear                   reset reasoning pane and journal scrollback (display only)",
 		"  /help                    this list",
 	}, "\n")
@@ -223,6 +227,29 @@ func (m *Model) cmdMode(args []string) (string, tea.Cmd) {
 		}
 		return statusMsg{Kind: statusNotice, Mode: want, Detail: "mode → " + want}
 	}
+}
+
+// cmdLogin runs the named harness's real interactive login by suspending the
+// TUI and exec'ing `hyperagent auth <harness>` on the inherited terminal —
+// same tea.ExecProcess pattern used to shell out to $EDITOR. hyperagent
+// itself runs the login under its allow-listed env (harness.go's
+// AllowlistEnv), so no daemon secret ever reaches it either way.
+//
+// Requires `hyperagent` on PATH and the TUI running on the same host as the
+// daemon: OAuth/browser flows need a real TTY, which the daemon's HTTP+WS
+// control channel can't carry.
+func (m *Model) cmdLogin(args []string) (string, tea.Cmd) {
+	if len(args) == 0 {
+		return "usage: /login pi|claude|codex|kimi", nil
+	}
+	harness := strings.ToLower(args[0])
+	c := exec.Command("hyperagent", "auth", harness)
+	return "", tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			return journalMsg{Kind: "error", Summary: "login " + harness + ": " + err.Error()}
+		}
+		return statusMsg{Kind: statusNotice, Detail: harness + " login done"}
+	})
 }
 
 // --- small helpers (ported verbatim from tui/internal/tui/commands.go) ---

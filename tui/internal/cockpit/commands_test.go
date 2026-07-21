@@ -42,6 +42,28 @@ func TestRunCommandClear(t *testing.T) {
 	}
 }
 
+func TestRunCommandLoginUsage(t *testing.T) {
+	m := testModel()
+	out, cmd := m.runCommand("/login")
+	if cmd != nil {
+		t.Error("/login with no args should be local (nil cmd)")
+	}
+	if !strings.Contains(out, "usage") {
+		t.Errorf("missing usage message: %q", out)
+	}
+}
+
+func TestRunCommandLoginDispatchesExecProcess(t *testing.T) {
+	m := testModel()
+	out, cmd := m.runCommand("/login claude")
+	if out != "" {
+		t.Errorf("login should have no immediate text output, got %q", out)
+	}
+	if cmd == nil {
+		t.Error("/login claude should return the ExecProcess tea.Cmd")
+	}
+}
+
 func TestRunCommandUnknown(t *testing.T) {
 	m := testModel()
 	out, _ := m.runCommand("/bogus")
