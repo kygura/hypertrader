@@ -8,10 +8,7 @@ Index of all pitch, marketing, and investor materials.
 
 ### Pitch Deck
 
-- **[deck/README.md](deck/README.md)** — deployment guide (Vercel, Cloudflare Pages)
-- **[deck/deck.md](deck/deck.md)** — slide outline (markdown reference)
-- **[deck/index.html](deck/index.html)** — deck landing page
-- **[pitch.html](pitch.html)** — interactive pitch deck (authoritative version)
+- **[pitch.html](pitch.html)** — interactive pitch deck (authoritative version, deployed at the site root)
 - **[PITCH.md](PITCH.md)** — authored pitch copy (revised 2026-07-22; contact founders before further edits)
 
 ### Founder Materials
@@ -39,7 +36,6 @@ Index of all pitch, marketing, and investor materials.
 | investor/FINANCIAL-PLAN.md | Founders + Finance | Annual review | — |
 | investor/README.md | Founders | Current | — |
 | pitch.html | (generated from PITCH.md) | Current | — |
-| deck/ | Engineering | Current | — |
 
 ---
 
@@ -74,16 +70,15 @@ Index of all pitch, marketing, and investor materials.
 ### For YC
 
 1. **[YC-APPLICATION.md](YC-APPLICATION.md)** — timeline and checklist
-2. **[deck/](deck/)** — deploy and share live demo URL
+2. **[pitch.html](pitch.html)** — deployed landing page, share the live demo URL
 3. Founder video (1 min, unlisted YouTube)
 4. **[investor/FINANCIAL-PLAN.md](investor/FINANCIAL-PLAN.md)** — prep for "how will you make money"
 
 ### For Early Users / Crypto Community
 
-1. **[deck/index.html](deck/index.html)** — deployed landing page
-2. **[pitch.html](pitch.html)** — interactive deck
-3. Live demo + journal walkthrough
-4. Social: Twitter/Discord with landing page link
+1. **[pitch.html](pitch.html)** — deployed landing page / interactive deck
+2. Live demo + journal walkthrough
+3. Social: Twitter/Discord with landing page link
 
 ### For Enterprise / Funds
 
@@ -100,7 +95,7 @@ Before sharing any materials publicly:
 
 - [ ] Rotate all API keys (OpenAI, Deepseek, Hyperliquid) in `backend/.env`
 - [ ] Verify `.env` is gitignored and not in git history
-- [ ] Deploy `deck/` to Vercel/Cloudflare
+- [ ] Deploy `pitch/` to Vercel (`cd pitch && vercel --prod`)
 - [ ] Test deployed URL in incognito browser
 - [ ] Verify media (GIFs, videos) loads
 - [ ] Add deployed URL to YC application
@@ -129,13 +124,10 @@ See **[YC-APPLICATION.md](YC-APPLICATION.md)** for full timeline.
 ```
 pitch/
 ├── README.md                    ← You are here
-├── PITCH.md                     ← Authored pitch copy (locked)
+├── PITCH.md                     ← Authored pitch copy
 ├── YC-APPLICATION.md            ← YC batch prep
-├── pitch.html                   ← Interactive deck (main)
-├── deck/
-│   ├── README.md               ← Deployment guide
-│   ├── deck.md                 ← Slide outline
-│   └── index.html              ← Deck landing page
+├── pitch.html                   ← Interactive deck (deployed at site root)
+├── vercel.json                  ← Rewrites "/" to pitch.html
 ├── investor/
 │   ├── README.md               ← Investor materials index
 │   └── FINANCIAL-PLAN.md        ← Revenue model & projections
@@ -155,9 +147,9 @@ No. The pitch copy is authored and final. If core messaging needs to change, con
 
 → `media/` folder. Update references in `pitch.html` if needed.
 
-### How do I deploy the deck?
+### How do I deploy the pitch page?
 
-→ Read **[deck/README.md](deck/README.md)** for Vercel, Cloudflare Pages, or GitHub Pages instructions.
+→ `cd pitch && vercel --prod` (linked to the `hyperion-landing` Vercel project, live at hypertrade.space / pitch-deploy-blue.vercel.app). `vercel.json` rewrites `/` to `/pitch.html` so the site root serves it directly.
 
 ### What's the financial model?
 
