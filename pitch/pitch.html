@@ -45,6 +45,15 @@
       --accent: #c98f66;
     }
   }
+  /* Palettes — swap the accent via ?palette=cyan|green (see initPalette) */
+  body[data-palette="cyan"] { --accent: #0d8f83; }
+  body[data-palette="cyan"][data-theme="dark"] { --accent: #4fd8c4; }
+  body[data-palette="green"] { --accent: #3f7d4f; }
+  body[data-palette="green"][data-theme="dark"] { --accent: #7cc98f; }
+  @media (prefers-color-scheme: dark) {
+    body[data-palette="cyan"]:not([data-theme]) { --accent: #4fd8c4; }
+    body[data-palette="green"]:not([data-theme]) { --accent: #7cc98f; }
+  }
   a { color: inherit; }
   ::selection { background: var(--accent); color: var(--paper); }
   * { transition: color .35s ease, background-color .35s ease, border-color .35s ease; }
@@ -68,7 +77,6 @@
   @keyframes htScLine { 0% { transform: translateY(-110%); } 60%, 100% { transform: translateY(230%); } }
   @keyframes htSpin { to { transform: rotate(360deg); } }
   @keyframes htSheen { 0%, 55% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
-  @keyframes htBtnSheen { from { transform: translateX(-160%); } to { transform: translateX(160%); } }
 
   [data-hero-anim] { opacity: 0; animation: htRise .95s var(--ease-out) forwards; }
   [data-hero-anim="0"] { animation-delay: .08s; }
@@ -125,12 +133,10 @@
   .hero .tagline { font-family: "Newsreader", serif; font-style: italic; font-weight: 400; font-size: clamp(19px, 2.3vw, 27px); line-height: 1.45; color: var(--ink); max-width: 34ch; margin: 0 0 26px; }
   .hero p.lead { font-size: 17px; line-height: 1.65; color: var(--ink2); max-width: 55ch; margin: 0 0 40px; }
   .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
-  .btn { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; text-decoration: none; padding: 15px 26px; border-radius: 4px; display: inline-block; position: relative; overflow: hidden; isolation: isolate; border: 1px solid transparent; transition: opacity .25s ease, transform .3s var(--ease-out), border-color .3s ease, box-shadow .35s var(--ease-out); }
-  .btn::before { content: ""; position: absolute; inset: 0; width: 55%; background: linear-gradient(100deg, transparent, color-mix(in srgb, var(--paper) 75%, transparent), transparent); transform: translateX(-180%); pointer-events: none; z-index: 1; }
-  .btn:hover::before { animation: htBtnSheen 0.6s ease-in-out; }
-  .btn:active { transform: scale(.96); transition-duration: .12s; }
-  .btn-primary { background: var(--ink); color: var(--paper); background-image: linear-gradient(110deg, var(--ink) 0%, color-mix(in srgb, var(--accent) 70%, var(--ink)) 50%, var(--ink) 100%); background-size: 230% 100%; background-position: 0% 0%; transition: background-position .45s var(--ease-out), border-color .3s ease, box-shadow .35s var(--ease-out); }
-  .btn-primary:hover { opacity: 1; background-position: 100% 0%; border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--ink) 55%, transparent), 0 16px 38px -14px color-mix(in srgb, var(--accent) 85%, transparent); }
+  .btn { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; padding: 14px 28px; border-radius: 10px; display: inline-block; position: relative; border: 1px solid transparent; transition: background-color .3s cubic-bezier(.4,0,.2,1), border-color .3s cubic-bezier(.4,0,.2,1), box-shadow .3s cubic-bezier(.4,0,.2,1), transform .2s cubic-bezier(.4,0,.2,1); }
+  .btn:active { transform: scale(.98); transition-duration: .1s; }
+  .btn-primary { background: var(--ink); color: var(--paper); }
+  .btn-primary:hover { background: color-mix(in srgb, var(--accent) 24%, var(--ink)); border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: 0 4px 18px -8px color-mix(in srgb, var(--accent) 55%, transparent); }
 
   .scroll-cue { position: absolute; right: 40px; bottom: 40px; display: flex; flex-direction: column; align-items: center; gap: 12px; pointer-events: none; }
   .scroll-cue .sc-label { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.24em; color: var(--ink2); writing-mode: vertical-rl; }
@@ -224,11 +230,6 @@
   #proof h2 { margin-bottom: 18px; }
   .proof-lead { font-size: 16.5px; line-height: 1.7; color: var(--ink2); max-width: 66ch; margin: 0 0 54px; }
   .proof-lead strong { color: var(--ink); font-weight: 500; }
-  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 0 0 64px; }
-  .stat { background: var(--paper2); padding: 30px 26px 26px; transition: background-color .35s ease; }
-  .stat:hover { background: color-mix(in srgb, var(--accent) 6%, var(--paper2)); }
-  .stat .n { font-family: "Newsreader", serif; font-size: clamp(38px, 4.4vw, 58px); line-height: 1; margin-bottom: 14px; font-variant-numeric: tabular-nums; }
-  .stat .cap { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; line-height: 1.7; color: var(--ink2); }
   .ledger { border-bottom: 1px solid var(--line); }
   .ledger-row { display: grid; grid-template-columns: 150px 1fr; gap: 28px; padding: 20px 0; border-top: 1px solid var(--line); transition: transform .3s var(--ease-out), opacity .85s var(--ease-out); }
   .ledger-row:hover { transform: translateX(5px); }
@@ -287,7 +288,6 @@
   @media (max-width: 860px) {
     #thesis .grid, .loop-grid, .now-grid, .term-body { grid-template-columns: 1fr; }
     #thesis .sticky-col { position: static; }
-    .stat-grid { grid-template-columns: 1fr 1fr; }
     .ledger-row { grid-template-columns: 1fr; gap: 8px; }
     .term-side { border-left: none; border-top: 1px solid var(--line); }
     nav.mainnav { gap: 14px; }
@@ -501,7 +501,7 @@
       </div>
     </div>
   </div>
-  <p class="footnote">ILLUSTRATIVE CONCEPT · PRODUCT IN DEVELOPMENT</p>
+  <p class="footnote">ILLUSTRATIVE CONCEPT</p>
 </section>
 
 <section id="proof" class="page wrap">
@@ -511,20 +511,6 @@
   </div>
   <h2 class="section-title">Built, not just imagined.</h2>
   <p data-anim="rise" class="proof-lead">The full loop (ingest, reason, execute, journal) exists as a working prototype. It de-risks the hard parts (signing, gating, continuous reasoning) and generates the journal evidence the product story rests on.</p>
-  <div class="stat-grid" data-anim="rise">
-    <div class="stat">
-      <div class="n" data-stat-count data-count-to="300" data-prefix="~">~300</div>
-      <div class="cap">Lines of owned EIP-712 signing, byte-exact against reference vectors</div>
-    </div>
-    <div class="stat">
-      <div class="n">0</div>
-      <div class="cap">Withdrawal authority: the agent wallet is trade-only</div>
-    </div>
-    <div class="stat">
-      <div class="n">6</div>
-      <div class="cap">Compiled risk gates enforced on every order before it reaches the venue</div>
-    </div>
-  </div>
   <div class="ledger">
     <div class="ledger-row" data-anim="rise">
       <span class="ledger-key">INGEST</span>
@@ -615,6 +601,14 @@
   var themeBtn = document.getElementById("theme-toggle");
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var canHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  // canvas/ctx/candle state must exist before initTheme below, which draws a frame immediately for reduced-motion users
+  var canvas = document.getElementById("feed");
+  var ctx = canvas.getContext("2d");
+  var dpr = 1, visible = true, raf = null, last = 0;
+  var marks = [], markRaf = null;                        // execution markers dropped on click
+  var CELL = 9;                                     // css px per candle column / row
+  var candles = [], candleSeed = 0, priceWalk = 0.5, lastCandleAt = 0;
+  var CANDLE_GAP = 640;                              // ms between new candles
 
   function getStoredTheme() {
     try { return localStorage.getItem("hyperion-theme"); } catch (e) { return null; }
@@ -642,6 +636,18 @@
     var cur = body.getAttribute("data-theme") === "dark" ? "dark" : "light";
     applyTheme(cur === "dark" ? "light" : "dark", true);
   });
+
+  // Palette — swap the accent color via ?palette=cyan|green|orange, persisted after that
+  var PALETTES = ["orange", "cyan", "green"];
+  (function initPalette() {
+    var qp = new URLSearchParams(window.location.search).get("palette");
+    var stored;
+    try { stored = localStorage.getItem("hyperion-palette"); } catch (e) { stored = null; }
+    var palette = PALETTES.indexOf(qp) !== -1 ? qp : (PALETTES.indexOf(stored) !== -1 ? stored : "orange");
+    body.setAttribute("data-palette", palette);
+    if (PALETTES.indexOf(qp) !== -1) { try { localStorage.setItem("hyperion-palette", qp); } catch (e) {} }
+    if (!motionOn()) drawFrame(performance.now());
+  })();
 
   function motionOn() { return !reduced; }
 
@@ -703,13 +709,13 @@
     document.querySelectorAll("[data-magnetic]").forEach(function (el) {
       var dx = 0, dy = 0, pressed = false;
       function render() {
-        var scale = pressed ? 0.94 : 1.05;
+        var scale = pressed ? 0.98 : 1.015;
         el.style.transform = "translate(" + dx.toFixed(1) + "px," + dy.toFixed(1) + "px) scale(" + scale + ")";
       }
       el.addEventListener("mousemove", function (e) {
         var r = el.getBoundingClientRect();
-        dx = ((e.clientX - (r.left + r.width / 2)) / (r.width / 2)) * 3.5;
-        dy = ((e.clientY - (r.top + r.height / 2)) / (r.height / 2)) * 2.5;
+        dx = ((e.clientX - (r.left + r.width / 2)) / (r.width / 2)) * 2;
+        dy = ((e.clientY - (r.top + r.height / 2)) / (r.height / 2)) * 1.4;
         render();
       });
       el.addEventListener("mouseenter", render);
@@ -720,11 +726,6 @@
   }
 
   // Market field canvas — ascii candlestick tape
-  var canvas = document.getElementById("feed");
-  var ctx = canvas.getContext("2d");
-  var dpr = 1, visible = true, raf = null, last = 0;
-  var marks = [], markRaf = null;                        // execution markers dropped on click
-
   function handleMarketClick(e) {
     if (reduced) return;
     var rect = canvas.getBoundingClientRect();
@@ -780,9 +781,6 @@
   }
 
   // Live ascii candlestick tape — the operator's price feed, drawn as monospace glyphs.
-  var CELL = 9;                                     // css px per candle column / row
-  var candles = [], candleSeed = 0, priceWalk = 0.5, lastCandleAt = 0;
-  var CANDLE_GAP = 640;                              // ms between new candles
   function nextCandle() {
     candleSeed++;
     var drift = (fbm(candleSeed * 0.12, 3.7, candleSeed * 0.4) - 0.5) * 0.09;
@@ -1169,30 +1167,6 @@
       });
     }, { threshold: 0.4 });
     tamRows.forEach(function (row) { tamIo.observe(row); });
-  }
-
-  // Proof stat count-up
-  var statEls = document.querySelectorAll("[data-stat-count]");
-  if (statEls.length && !reduced) {
-    var statIo = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (!e.isIntersecting) return;
-        var el = e.target;
-        statIo.unobserve(el);
-        var target = parseFloat(el.getAttribute("data-count-to"));
-        var prefix = el.getAttribute("data-prefix") || "";
-        var start = performance.now();
-        var dur = 1200;
-        function step(now) {
-          var t = Math.min(1, (now - start) / dur);
-          var eased = 1 - Math.pow(1 - t, 3);
-          el.textContent = prefix + Math.round(target * eased);
-          if (t < 1) requestAnimationFrame(step);
-        }
-        requestAnimationFrame(step);
-      });
-    }, { threshold: 0.5 });
-    statEls.forEach(function (el) { statIo.observe(el); });
   }
 
   // Contact — copy email to clipboard
