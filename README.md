@@ -126,7 +126,7 @@ Other scripts: `bun run build` (typecheck + Vite build), `bun run lint`, `bun ru
 
 ## Development
 
-Cockpit build complete: five-panel layout, live feeds, thesis cards, chat-driven slash commands, mode toggle. Per `TASKS.md`, current work in flight adds `hyperagent doctor` and `hyperagent auth <harness>` subcommands for harness-provider setup/health checks. No CI is currently configured in this repo.
+Cockpit build complete: five-panel layout, live feeds, thesis cards, chat-driven slash commands, mode toggle. Per `TASKS.md`, current work in flight adds `hyperagent doctor` and `hyperagent auth <harness>` subcommands for harness-provider setup/health checks. CI (`.github/workflows/ci.yml`) runs backend and TUI Go tests plus a dashboard build on every push and PR to `master`.
 
 ## MCP Usage
 
